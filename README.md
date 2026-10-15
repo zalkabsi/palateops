@@ -2,6 +2,8 @@
 
 **Food planning powered by cultural intelligence.**
 
+**Try the public demo:** [palateops-qloo.zeynkbsi.chatgpt.site](https://palateops-qloo.zeynkbsi.chatgpt.site). It opens in Sample mode with labeled synthetic taste cues; Live Qloo mode needs an authorized event key.
+
 PalateOps helps cafeteria teams turn attendance, budget, dietary rules and voluntary dining interests into a five-day operational menu. It compares an operational baseline with a taste-signal plan, checks hard constraints, totals estimated ingredient costs and prepares a shopping list.
 
 > The default public demo uses synthetic taste cues. They are labeled and are not Qloo responses. Live Qloo requests require an authorized event credential installed as a server-side Site secret. No live validation has been completed yet.

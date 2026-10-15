@@ -38,5 +38,5 @@ Configure an event-issued key, run the three-profile live experiment, validate r
 
 ## Demo and repository
 
-- Demo: https://palateops-qloo.zeynkbsi.chatgpt.site (deployment and public access must be verified before submission)
-- Source: https://github.com/zalkabsi/palateops-qloo
+- Demo: https://palateops-qloo.zeynkbsi.chatgpt.site (production deployment succeeded; the Sites access policy is public. The runner could not resolve the hostname for an external HTTP check.)
+- Source: https://github.com/zalkabsi/palateops-qloo (source and MIT license are committed; the repository is still private because the connected GitHub tools do not expose the visibility setting.)

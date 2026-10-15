@@ -18,13 +18,12 @@
 - Local build and automated tests: passed for the current source.
 - Browser interaction: desktop and mobile smoke checks passed, including plan generation, supply shock and CSV export.
 - Live Qloo request: pending event-issued credential.
-- Public GitHub repository: blocked until the existing private repository is made public; the repository settings control is not available in the current GitHub connection.
-- Public hosted deployment: source publication and anonymous access check in progress.
+- GitHub source and MIT license: committed to `zalkabsi/palateops-qloo`; its visibility remains private because the connected GitHub tools do not expose repository settings.
+- Public hosted deployment: production publish succeeded and Sites reports public access. External HTTP reachability was not verified because the runner could not resolve the published hostname.
 
 ## Remaining work
 
 - Re-run automated and build checks after documentation updates.
-- Verify the published UI and public access.
 - Configure live Qloo only if an authorized credential is supplied.
-- Make repository visibility public, push source and verify license visibility.
-- Publish the Site with public access and verify its public URL.
+- Switch the GitHub repository to public in its owner settings, then verify source and license visibility.
+- Check the published URL from a public network that can resolve the Sites hostname.

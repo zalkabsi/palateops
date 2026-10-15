@@ -31,15 +31,16 @@ export default {
 };
 
 async function handleQloo(request, env) {
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  if (contentType !== "application/json") {
     return json({ error: "The taste profile request must use application/json." }, 415, request);
   }
   const length = Number(request.headers.get("content-length") || 0);
   if (length > 4096) return json({ error: "The taste profile request is too large." }, 413, request);
   let body;
   try {
-    const rawBody = await request.text();
-    if (rawBody.length > 4096) return json({ error: "The taste profile request is too large." }, 413, request);
+    const rawBody = await readBodyWithLimit(request, 4096);
+    if (rawBody === null) return json({ error: "The taste profile request is too large." }, 413, request);
     body = JSON.parse(rawBody);
   } catch { return json({ error: "The taste profile request must be valid JSON." }, 400, request); }
   const venues = normalizeVenues(body?.venues);
@@ -85,6 +86,34 @@ async function handleQloo(request, env) {
     const status = error?.status === 422 ? 422 : error?.status === 429 ? 429 : 502;
     return json({ error: safeError(error) }, status, request);
   }
+}
+
+async function readBodyWithLimit(request, maxBytes) {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
 async function searchPlace(name, apiKey) {

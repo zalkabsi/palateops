@@ -68,6 +68,35 @@ test("serving counts track changed attendance and the 35 percent planning assump
   assert.ok(plan.days.every((day) => day.items.find((item) => item.vegetarian).servings === 70));
 });
 
+test("a one-person plan still serves its required vegetarian portion", () => {
+  const scenario = normalizeScenario({ attendance: 1, vegetarianShare: 0.35 });
+  const plan = generatePlan(scenario);
+  assert.equal(plan.status, "feasible");
+  assert.ok(plan.days.every((day) => day.totalServings === 1));
+  assert.ok(plan.days.every((day) => day.items.length === 1 && day.items[0].vegetarian && day.items[0].servings === 1));
+  assert.deepEqual(verifyPlan(plan, scenario), { valid: true, errors: [] });
+});
+
+test("plan verification enforces the configured vegetarian share", () => {
+  const scenario = normalizeScenario({ attendance: 200 });
+  const plan = generatePlan(scenario);
+  const vegetarian = plan.days[0].items.find((item) => item.vegetarian);
+  const flexible = plan.days[0].items.find((item) => !item.vegetarian);
+  vegetarian.servings -= 1;
+  flexible.servings += 1;
+  const result = verifyPlan(plan, scenario);
+  assert.equal(result.valid, false);
+  assert.ok(result.errors.some((error) => error.includes("vegetarian serving share")));
+});
+
+test("invalid stock and price multiplier values are normalized safely", () => {
+  const scenario = normalizeScenario({ inventory: { rice: Infinity, chickpeas: 5 }, priceMultipliers: { chicken: Infinity, rice: 0 } });
+  assert.equal(scenario.inventory.rice, 0);
+  assert.equal(scenario.inventory.chickpeas, 5);
+  assert.equal(scenario.priceMultipliers.chicken, 1);
+  assert.equal(scenario.priceMultipliers.rice, 0);
+});
+
 test("procurement totals ingredient requirements and nets available stock", () => {
   const plan = generatePlan(demo);
   const emptyStock = calculateShoppingList(plan, demo);

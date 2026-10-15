@@ -36,7 +36,9 @@ export function recipeCostPerServing(recipe, multipliers = {}) {
     const quantity = entry[1];
     const price = INGREDIENTS[key]?.price;
     if (!Number.isFinite(price) || !Number.isFinite(quantity) || quantity < 0) return Infinity;
-    return sum + price * quantity * (Number(multipliers[key]) || 1);
+    const multiplier = multipliers[key] == null ? 1 : Number(multipliers[key]);
+    if (!Number.isFinite(multiplier) || multiplier < 0) return Infinity;
+    return sum + price * quantity * multiplier;
   }, 0);
 }
 
@@ -57,11 +59,12 @@ function candidatePairs(scenario, recipes) {
   const vegetarian = recipes.filter((recipe) => recipe.vegetarian);
   const all = recipes;
   const pairs = [];
+  const vegServings = requiredVegetarianServings(scenario);
+  const flexServings = scenario.attendance - vegServings;
   for (const veggie of vegetarian) {
     for (const other of all) {
       if (other.id === veggie.id) continue;
-      const vegServings = Math.round(scenario.attendance * scenario.vegetarianShare);
-      const flexServings = scenario.attendance - vegServings;
+      if (flexServings > 0 && other.vegetarian) continue;
       const items = [
         { recipe: veggie, servings: vegServings },
         { recipe: other, servings: flexServings },
@@ -208,12 +211,21 @@ export function verifyPlan(plan, scenarioInput) {
     if (day.totalServings !== scenario.attendance) errors.push(day.day + " does not cover planned attendance.");
     if (day.totalCost > scenario.dailyBudget + 0.01) errors.push(day.day + " exceeds the daily ingredient budget.");
     if (!day.items.some((item) => item.vegetarian)) errors.push(day.day + " has no vegetarian option.");
+    const vegetarianServings = day.items.filter((item) => item.vegetarian).reduce((sum, item) => sum + item.servings, 0);
+    if (vegetarianServings !== requiredVegetarianServings(scenario)) errors.push(day.day + " does not meet the planned vegetarian serving share.");
+    if (day.items.length < 1 || day.items.length > 2 || day.items.some((item) => !Number.isInteger(item.servings) || item.servings < 1)) {
+      errors.push(day.day + " must have one or two options with positive whole-number servings.");
+    }
     const forbidden = day.items.flatMap((item) => item.allergens).filter((allergen) => scenario.allergenExclusions.includes(allergen));
     if (forbidden.length) errors.push(day.day + " contains an excluded allergen.");
     const menuIds = day.items.map((item) => item.recipeId);
     if (new Set(menuIds).size !== menuIds.length) errors.push(day.day + " repeats the same recipe.");
   }
   return { valid: errors.length === 0, errors };
+}
+
+function requiredVegetarianServings(scenario) {
+  return Math.min(scenario.attendance, Math.max(1, Math.round(scenario.attendance * scenario.vegetarianShare)));
 }
 
 export function calculateShoppingList(plan, scenarioInput) {
@@ -230,7 +242,7 @@ export function calculateShoppingList(plan, scenarioInput) {
     const info = INGREDIENTS[key];
     const onHand = Math.max(0, Number(scenario.inventory[key]) || 0);
     const buy = Math.max(0, quantity - onHand);
-    const multiplier = Number(scenario.priceMultipliers[key]) || 1;
+    const multiplier = scenario.priceMultipliers[key] == null ? 1 : scenario.priceMultipliers[key];
     return {
       key,
       name: info.name,
@@ -257,12 +269,18 @@ export function summarizePlan(plan) {
 function normalizeInventory(value) {
   if (Array.isArray(value)) return {};
   if (!value || typeof value !== "object") return {};
-  return Object.fromEntries(Object.entries(value).map(([key, amount]) => [key, Math.max(0, Number(amount) || 0)]));
+  return Object.fromEntries(Object.entries(value).map(([key, amount]) => {
+    const quantity = Number(amount);
+    return [key, Number.isFinite(quantity) ? Math.max(0, quantity) : 0];
+  }));
 }
 
 function normalizeMultipliers(value) {
   if (!value || typeof value !== "object") return {};
-  return Object.fromEntries(Object.entries(value).map(([key, amount]) => [key, Math.max(0, Number(amount) || 1)]));
+  return Object.fromEntries(Object.entries(value).map(([key, amount]) => {
+    const multiplier = Number(amount);
+    return [key, Number.isFinite(multiplier) && multiplier >= 0 ? multiplier : 1];
+  }));
 }
 
 function normalizeList(value) {

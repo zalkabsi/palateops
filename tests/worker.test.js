@@ -39,12 +39,40 @@ test("live route rejects non-JSON cross-origin form submissions before checking 
   assert.equal(response.status, 415);
 });
 
+test("live route requires the exact JSON media type", async () => {
+  const response = await worker.fetch(new Request("https://palateops.test/api/qloo", {
+    method: "POST",
+    headers: { "content-type": "application/jsonp" },
+    body: "{}"
+  }), {});
+  assert.equal(response.status, 415);
+});
+
 test("live route enforces the request size limit", async () => {
   const response = await worker.fetch(new Request("https://palateops.test/api/qloo", {
     method: "POST",
     headers: { "content-type": "application/json", "content-length": "4097" },
     body: "{}"
   }), {});
+  assert.equal(response.status, 413);
+});
+
+test("live route bounds chunked request bodies without a content length", async () => {
+  const oversized = new TextEncoder().encode('{"venues":["' + "x".repeat(5000) + '"]}');
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(oversized);
+      controller.close();
+    }
+  });
+  const request = new Request("https://palateops.test/api/qloo", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+    duplex: "half"
+  });
+  assert.equal(request.headers.get("content-length"), null);
+  const response = await worker.fetch(request, {});
   assert.equal(response.status, 413);
 });
 

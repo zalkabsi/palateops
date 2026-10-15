@@ -1,4 +1,4 @@
-import { INGREDIENTS, SAMPLE_PROFILES } from "./recipes.js";
+import { INGREDIENTS, RECIPES, SAMPLE_PROFILES } from "./recipes.js";
 import { calculateShoppingList, generatePlan, normalizeScenario, summarizePlan, validateScenario, verifyPlan } from "./planner.js";
 import { fetchLiveTasteSignals, sampleSignal } from "./qloo.js";
 
@@ -29,12 +29,14 @@ renderSummary();
 
 function bindEvents() {
   generateButton.addEventListener("click", generate);
-  emptyGenerateButton.addEventListener("click", generate);
+  byId("emptyGenerateButton").addEventListener("click", generate);
   form.addEventListener("input", () => {
+    markPlanOutdated();
     renderSummary();
     saveForm();
   });
   form.addEventListener("change", () => {
+    markPlanOutdated();
     renderSummary();
     saveForm();
   });
@@ -43,10 +45,12 @@ function bindEvents() {
   byId("sampleProfile").addEventListener("change", () => {
     state.sampleProfile = byId("sampleProfile").value;
     renderProfilePreview();
+    markPlanOutdated();
     saveForm();
   });
   document.querySelectorAll(".weight-grid input").forEach((node) => {
     node.addEventListener("input", () => {
+      markPlanOutdated();
       updateWeightLabels();
       saveForm();
     });
@@ -55,7 +59,10 @@ function bindEvents() {
   byId("shockButton").addEventListener("click", simulateShock);
   byId("exportButton").addEventListener("click", exportShoppingList);
   byId("helpButton").addEventListener("click", () => byId("helpDialog").showModal());
-  byId("venueNames").addEventListener("input", saveForm);
+  byId("venueNames").addEventListener("input", () => {
+    markPlanOutdated();
+    saveForm();
+  });
   byId("helpDialog").addEventListener("click", (event) => {
     if (event.target === byId("helpDialog")) byId("helpDialog").close();
   });
@@ -68,6 +75,7 @@ function bindEvents() {
 }
 
 function setMode(mode) {
+  const changed = state.mode !== mode;
   state.mode = mode;
   const sample = mode === "sample";
   byId("sampleModeButton").classList.toggle("active", sample);
@@ -80,7 +88,9 @@ function setMode(mode) {
   byId("modeStatus").innerHTML = '<span class="mode-dot"></span>' + (sample ? "Sample mode" : "Live Qloo mode");
   byId("sampleDisclaimer").hidden = !sample;
   byId("compareTitle").textContent = sample ? "Taste signal advantage" : "Qloo advantage";
-  byId("signalPlanCaption").textContent = sample ? "Synthetic sample signal plan" : "Live Qloo tag signals";
+  const signalPlanCaption = byId("signalPlanCaption");
+  if (signalPlanCaption) signalPlanCaption.textContent = sample ? "Synthetic sample signal plan" : "Live Qloo tag signals";
+  if (changed) markPlanOutdated();
   saveForm();
 }
 
@@ -115,10 +125,21 @@ async function generate() {
   const scenario = readScenario();
   const errors = validateScenario(scenario);
   if (errors.length) {
+    state.baseline = null;
+    state.tastePlan = null;
+    state.signal = null;
+    state.scenario = scenario;
+    clearPlanPanels();
     setPlanStatus("Needs attention", "error");
+    showPlanMessage("Check the planning inputs", errors[0], "Adjust the fields, then try again.");
     toast(errors[0]);
     return;
   }
+  state.baseline = null;
+  state.tastePlan = null;
+  state.signal = null;
+  state.scenario = scenario;
+  clearPlanPanels();
   state.busy = true;
   setButtonsDisabled(true);
   byId("menuGrid").hidden = true;
@@ -150,7 +171,7 @@ async function generate() {
     loadingText("Finding recipes that fit the kitchen…");
     const weights = readWeights();
     const baseline = generatePlan(scenario, { weights });
-    trace.push({ title: "Retrieve eligible recipes", detail: "30 original recipes checked against selected exclusions and available equipment", icon: "⌕" });
+    trace.push({ title: "Retrieve eligible recipes", detail: RECIPES.length + " original recipes checked against selected exclusions and available equipment", icon: "⌕" });
     setTrace(trace);
     await pause(220);
 
@@ -197,8 +218,10 @@ async function generate() {
     loadingCard.hidden = true;
     planEmpty.hidden = true;
     byId("menuGrid").hidden = true;
+    clearPlanPanels();
     setPlanStatus("Request needs attention", "error");
     setTrace(trace.concat([{ title: "Planning stopped safely", detail: message, icon: "!" }]));
+    showPlanMessage("Planning request failed", message, "Check the settings or connection, then try again.");
     toast(message);
   } finally {
     state.busy = false;
@@ -257,17 +280,21 @@ function renderComparison(baseline, tastePlan) {
   const baseRecipes = new Set(baseline.days.flatMap((day) => day.items.map((item) => item.recipeId)));
   const signalRecipes = new Set(tastePlan.days.flatMap((day) => day.items.map((item) => item.recipeId)));
   const changed = [...new Set([...baseRecipes, ...signalRecipes])].filter((id) => baseRecipes.has(id) !== signalRecipes.has(id)).length;
+  const totalOptions = tastePlan.days.reduce((count, day) => count + day.items.length, 0);
   const baselineCard = compareCard(baseline, baselineSummary, false);
   const signalCard = compareCard(tastePlan, signalSummary, true);
   const cards = byId("compareGrid").querySelectorAll(".compare-card");
   cards[0].innerHTML = baselineCard;
   cards[1].innerHTML = signalCard;
-  byId("comparisonVerdict").innerHTML = '<span class="verdict-star">✦</span><span>' +
-    (changed === 0
-      ? 'The same recipe set wins under both runs. ' + (state.mode === "live" ? 'The returned Qloo tags did not change the selected meals under these hard constraints.' : 'The synthetic sample cues did not change the selected meals under these hard constraints.')
-      : state.mode === "live"
-        ? changed + ' recipe selections differ when Qloo tag mappings are included. ' + signalSummary.signalCovered + ' of 10 planned options map to cuisine labels found in returned Qloo tags. This is catalog tag coverage, not a claim about satisfaction.'
-        : changed + ' recipe selections differ when synthetic sample cues are included. ' + signalSummary.signalCovered + ' of 10 planned options match the curated cuisine list. This is a demo comparison, not a Qloo result or satisfaction claim.') +
+  const changeSummary = changed === 0
+    ? 'The same recipe set wins under both runs. ' + (state.mode === "live" ? 'The returned Qloo tags did not change the selected meals under these hard constraints.' : 'The synthetic sample cues did not change the selected meals under these hard constraints.')
+    : state.mode === "live"
+      ? changed + ' recipe selections differ when Qloo tag mappings are included.'
+      : changed + ' recipe selections differ when synthetic sample cues are included.';
+  const coverageSummary = state.mode === "live"
+    ? ' ' + signalSummary.signalCovered + ' of ' + totalOptions + ' planned options map to cuisine labels found in returned Qloo tags. This is catalog tag coverage, not a claim about satisfaction.'
+    : ' ' + signalSummary.signalCovered + ' of ' + totalOptions + ' planned options match the curated cuisine list. This is a demo comparison, not a Qloo result or satisfaction claim.';
+  byId("comparisonVerdict").innerHTML = '<span class="verdict-star">✦</span><span>' + changeSummary + coverageSummary +
     (state.shock ? '<br><strong>Supply shock:</strong> covers ' + state.shock.beforeAttendance + ' → ' + state.shock.afterAttendance + '; chicken price +20%; taste-plan estimate ' + money(state.shock.beforeCost) + ' → ' + money(tastePlan.totalCost) + '.' : '') +
     '</span>';
 }
@@ -336,12 +363,59 @@ function renderSummary() {
 
 function showInfeasible(reason) {
   loadingCard.hidden = true;
+  showPlanMessage("No feasible menu under these constraints", reason, "Adjust the budget, exclusions or equipment list, then try again. Safety-related restrictions are never relaxed automatically.");
+}
+
+function showPlanMessage(title, reason, guidance) {
   planEmpty.hidden = false;
   byId("planEmpty").innerHTML = '<div class="empty-illustration"><span>!</span><span>▤</span><span>×</span></div>' +
-    '<strong>No feasible menu under these constraints.</strong>' +
-    '<p>' + escapeHtml(reason) + ' Adjust the budget, exclusions or equipment list, then try again. Safety-related restrictions are never relaxed automatically.</p>' +
+    '<strong>' + escapeHtml(title) + '.</strong>' +
+    '<p>' + escapeHtml(reason) + ' ' + escapeHtml(guidance) + '</p>' +
     '<button class="button button-primary" id="emptyGenerateButton">Try again <span>→</span></button>';
   byId("emptyGenerateButton").addEventListener("click", generate);
+}
+
+function clearPlanPanels() {
+  byId("menuGrid").innerHTML = "";
+  byId("menuGrid").hidden = true;
+  byId("planFootnote").hidden = true;
+  byId("planSubtitle").textContent = "Generate a plan to compare operational fit with taste signals.";
+  byId("metricCuisineCount").textContent = "—";
+  byId("metricWeeklyCost").textContent = "—";
+  renderComparisonPlaceholder();
+  renderShoppingPlaceholder();
+  setButtonsDisabled(false);
+}
+
+function renderComparisonPlaceholder() {
+  const signalLabel = state.mode === "live" ? "Live Qloo tag signal plan" : "Synthetic sample signal plan";
+  byId("compareGrid").innerHTML = '<article class="compare-card"><div class="compare-card-top"><span class="compare-index">A</span><div><strong>Constraints only</strong><small>Operational baseline</small></div><span class="compare-badge">BASELINE</span></div><div class="compare-placeholder">Generate the week to compare plans.</div></article>' +
+    '<article class="compare-card accent-card"><div class="compare-card-top"><span class="compare-index">B</span><div><strong>Taste signals included</strong><small>' + escapeHtml(signalLabel) + '</small></div><span class="compare-badge accent-badge">WITH SIGNALS</span></div><div class="compare-placeholder">Generate the week to compare plans.</div></article>';
+  byId("comparisonVerdict").innerHTML = '<span class="verdict-star">✦</span><span>What changed because the signal was included will appear here. If nothing changes, PalateOps will say so.</span>';
+}
+
+function renderShoppingPlaceholder() {
+  byId("shoppingList").innerHTML = '<div class="muted-empty">Your consolidated list will appear after planning.</div>';
+  byId("shoppingList").dataset.lines = "[]";
+  byId("shoppingTotal").textContent = "—";
+}
+
+function markPlanOutdated() {
+  if (!state.tastePlan || state.busy) return;
+  const hadShock = Boolean(state.shock);
+  state.baseline = null;
+  state.tastePlan = null;
+  state.signal = null;
+  state.scenario = null;
+  state.shock = null;
+  clearPlanPanels();
+  setPlanStatus("Settings changed", "error");
+  setTrace([]);
+  showPlanMessage(
+    "Plan needs to be regenerated",
+    "One or more settings changed after this plan was created.",
+    hadShock ? "The simulated supply shock was cleared with the old plan. Generate a fresh plan." : "Generate again to update the menu, comparison and shopping list.",
+  );
 }
 
 function simulateShock() {
@@ -350,7 +424,7 @@ function simulateShock() {
   const beforeCost = state.tastePlan.totalCost;
   const attendance = Math.ceil(beforeAttendance * 1.25);
   const priceMultipliers = { ...state.scenario.priceMultipliers, chicken: (Number(state.scenario.priceMultipliers.chicken) || 1) * 1.2 };
-  state.shock = { beforeAttendance, afterAttendance: attendance, beforeCost };
+  state.shock = { beforeAttendance, afterAttendance: attendance, beforeCost, priceMultipliers };
   byId("attendance").value = attendance;
   const scenario = normalizeScenario({ ...state.scenario, attendance, priceMultipliers });
   state.scenario = scenario;
@@ -360,6 +434,10 @@ function simulateShock() {
 }
 
 async function generateWithExistingSignal(scenario) {
+  state.baseline = null;
+  state.tastePlan = null;
+  state.scenario = scenario;
+  clearPlanPanels();
   state.busy = true;
   setButtonsDisabled(true);
   loadingCard.hidden = false;
@@ -385,7 +463,16 @@ async function generateWithExistingSignal(scenario) {
     state.scenario = scenario;
     renderAll();
     setPlanStatus("Replanned after supply shock", "ready");
-    toast("Plan rebuilt for " + attendance.toLocaleString() + " covers with a 20% chicken price increase.");
+    toast("Plan rebuilt for " + scenario.attendance.toLocaleString() + " covers with a 20% chicken price increase.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The supply shock replan could not be completed.";
+    state.baseline = null;
+    state.tastePlan = null;
+    clearPlanPanels();
+    setPlanStatus("Replan needs attention", "error");
+    setTrace([{ title: "Replanning stopped safely", detail: message, icon: "!" }]);
+    showPlanMessage("Could not replan the supply shock", message, "Try generating the plan again.");
+    toast(message);
   } finally {
     state.busy = false;
     loadingCard.hidden = true;
@@ -445,10 +532,8 @@ function resetDemo() {
   planEmpty.hidden = false;
   byId("planEmpty").innerHTML = '<div class="empty-illustration"><span>◉</span><span>✦</span><span>▤</span></div><strong>The kitchen is ready for a plan.</strong><p>We’ll check constraints, select a five-day menu, verify servings and cost, then make a shopping list.</p><button class="button button-primary" id="emptyGenerateButton">Generate my weekly menu <span>→</span></button>';
   byId("emptyGenerateButton").addEventListener("click", generate);
-  byId("shoppingList").innerHTML = '<div class="muted-empty">Your consolidated list will appear after planning.</div>';
-  byId("shoppingTotal").textContent = "—";
-  byId("comparisonVerdict").innerHTML = '<span class="verdict-star">✦</span><span>What changed because the signal was included will appear here. If nothing changes, PalateOps will say so.</span>';
-  byId("compareGrid").innerHTML = '<article class="compare-card"><div class="compare-card-top"><span class="compare-index">A</span><div><strong>Constraints only</strong><small>Operational baseline</small></div><span class="compare-badge">BASELINE</span></div><div class="compare-placeholder">Generate the week to compare plans.</div></article><article class="compare-card accent-card"><div class="compare-card-top"><span class="compare-index">B</span><div><strong>Taste signals included</strong><small>Synthetic sample signal plan</small></div><span class="compare-badge accent-badge">WITH SIGNALS</span></div><div class="compare-placeholder">Generate the week to compare plans.</div></article>';
+  renderShoppingPlaceholder();
+  renderComparisonPlaceholder();
   byId("planSubtitle").textContent = "Generate a plan to compare operational fit with taste signals.";
   setPlanStatus("Waiting for a plan", "");
   setTrace([]);
@@ -512,6 +597,10 @@ function setButtonsDisabled(disabled) {
   generateButton.disabled = disabled;
   const currentEmptyButton = byId("emptyGenerateButton");
   if (currentEmptyButton) currentEmptyButton.disabled = disabled;
+  form.querySelectorAll("input, select, textarea").forEach((node) => { node.disabled = disabled; });
+  document.querySelectorAll(".weight-grid input").forEach((node) => { node.disabled = disabled; });
+  ["sampleModeButton", "liveModeButton", "sampleProfile", "venueNames", "resetButton"].forEach((id) => { byId(id).disabled = disabled; });
+  byId("exportButton").disabled = disabled || !state.tastePlan;
   byId("shockButton").disabled = disabled || !state.tastePlan;
 }
 

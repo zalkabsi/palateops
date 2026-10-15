@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 510" role="img" aria-labelledby="title desc">
+  <title id="title">PalateOps architecture</title>
+  <desc id="desc">A browser interface runs a deterministic menu planner, reads an original recipe catalog, verifies hard constraints, and calculates procurement. Live Qloo requests pass through a same-origin Worker with a server-only key. Sample settings are saved in browser local storage.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#527763"/>
+    </marker>
+    <style>
+      .bg{fill:#f5f5ef}.box{fill:#fff;stroke:#dfe6dc;stroke-width:2}.green{fill:#eaf2e8;stroke:#b9cfb8}.blue{fill:#eef3f8;stroke:#c7d5e1}.gold{fill:#faf3e3;stroke:#e7d7ad}
+      .title{font:700 20px Arial,sans-serif;fill:#234435}.sub{font:14px Arial,sans-serif;fill:#718178}.kicker{font:700 12px Arial,sans-serif;letter-spacing:1.2px;fill:#77917d}
+      .line{fill:none;stroke:#527763;stroke-width:3;marker-end:url(#arrow)}.dash{stroke-dasharray:8 7}.small{font:12px Arial,sans-serif;fill:#8a958d}
+    </style>
+  </defs>
+  <rect class="bg" width="1200" height="510" rx="22"/>
+  <text x="48" y="48" class="kicker">PALATEOPS · REQUEST AND PLANNING FLOW</text>
+  <rect class="box" x="46" y="102" width="210" height="96" rx="14"/>
+  <text x="70" y="140" class="title">Kitchen manager</text><text x="70" y="168" class="sub">Service brief + constraints</text>
+  <rect class="box green" x="320" y="102" width="220" height="96" rx="14"/>
+  <text x="346" y="140" class="title">Browser interface</text><text x="346" y="168" class="sub">Sample or live Qloo mode</text>
+  <rect class="box" x="610" y="102" width="225" height="96" rx="14"/>
+  <text x="636" y="140" class="title">Deterministic planner</text><text x="636" y="168" class="sub">Portions + menu objective</text>
+  <rect class="box blue" x="910" y="86" width="240" height="88" rx="14"/>
+  <text x="936" y="123" class="title">32 original recipes</text><text x="936" y="150" class="sub">Ingredients + demo prices</text>
+  <rect class="box green" x="910" y="190" width="240" height="88" rx="14"/>
+  <text x="936" y="227" class="title">Hard-rule verifier</text><text x="936" y="254" class="sub">Budget · covers · exclusions</text>
+  <path class="line" d="M256 150 H320"/>
+  <path class="line" d="M540 150 H610"/>
+  <path class="line" d="M835 130 H910"/>
+  <path class="line" d="M835 168 C870 168 870 234 910 234"/>
+  <path class="line" d="M1030 174 V190"/>
+  <rect class="box" x="610" y="340" width="225" height="96" rx="14"/>
+  <text x="636" y="378" class="title">Procurement</text><text x="636" y="406" class="sub">Stock netting + CSV list</text>
+  <rect class="box gold" x="320" y="340" width="220" height="96" rx="14"/>
+  <text x="346" y="378" class="title">Qloo Site Worker</text><text x="346" y="406" class="sub">Key stays server-side</text>
+  <rect class="box blue" x="46" y="340" width="210" height="96" rx="14"/>
+  <text x="70" y="378" class="title">Qloo API</text><text x="70" y="406" class="sub">Resolved dining tags</text>
+  <path class="line" d="M725 198 V340"/>
+  <path class="line dash" d="M430 198 V340"/>
+  <path class="line" d="M320 388 H256"/>
+  <text x="50" y="472" class="small">Sample mode uses synthetic cues. Live mode uses only returned tags and reports unmapped results without fallback.</text>
+</svg>

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f5f4ee" />
+    <meta name="description" content="Cultural intelligence meets kitchen operations. Plan a week of feasible, cost-aware cafeteria menus." />
+    <title>PalateOps — Kitchen planning with cultural intelligence</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/src/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Main navigation">
+        <a class="brand" href="#overview" aria-label="PalateOps overview">
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+          <span><strong>palateops</strong><small>Kitchen intelligence</small></span>
+        </a>
+        <div class="workspace-label">WORKSPACE</div>
+        <div class="workspace-switch">
+          <span class="workspace-icon">CC</span>
+          <span><strong>Campus Commons</strong><small>Dining operations</small></span>
+          <span class="chevron">⌄</span>
+        </div>
+        <nav class="primary-nav">
+          <a class="nav-link active" href="#overview"><span class="nav-icon">◫</span>Overview</a>
+          <a class="nav-link" href="#weekly-plan"><span class="nav-icon">▤</span>Menu planner<span class="nav-count">5</span></a>
+          <a class="nav-link" href="#taste-signals"><span class="nav-icon">◉</span>Taste signals</a>
+          <a class="nav-link" href="#procurement"><span class="nav-icon">⌑</span>Procurement</a>
+          <a class="nav-link" href="#activity"><span class="nav-icon">↗</span>Agent activity</a>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-note">
+          <span class="note-dot"></span>
+          <div><strong>Sample workspace</strong><small>Changes save in this browser</small></div>
+        </div>
+        <div class="sidebar-user">
+          <span class="avatar">CC</span>
+          <div><strong>Campus Commons</strong><small>Kitchen manager</small></div>
+          <span class="more">•••</span>
+        </div>
+      </aside>
+
+      <main class="main-content" id="overview">
+        <header class="topbar">
+          <div class="breadcrumbs"><span>Workspaces</span><span class="crumb-sep">/</span><strong>Campus Commons</strong></div>
+          <div class="topbar-right">
+            <span class="saved-indicator"><span class="green-dot"></span>Saved locally</span>
+            <button class="icon-button" id="helpButton" aria-label="About PalateOps" title="About PalateOps">?</button>
+            <span class="avatar top-avatar">CC</span>
+          </div>
+        </header>
+
+        <div class="page-wrap">
+          <section class="hero-row">
+            <div>
+              <div class="overline"><span class="overline-dot"></span>WEEKLY SERVICE PLAN <span class="date-chip">DEMO SCENARIO</span></div>
+              <h1>Make room for <em>good taste.</em></h1>
+              <p class="hero-copy">A better cafeteria week starts with a plan that balances what diners enjoy with what your kitchen can deliver.</p>
+            </div>
+            <div class="hero-actions">
+              <span class="mode-indicator" id="modeStatus"><span class="mode-dot"></span>Sample mode</span>
+              <button class="button button-primary" id="generateButton"><span class="sparkle">✦</span>Generate my weekly menu</button>
+            </div>
+          </section>
+
+          <section class="metric-grid" aria-label="Planning scenario summary">
+            <article class="metric-card">
+              <div class="metric-label">DAILY COVERS <span class="metric-icon icon-sand">↗</span></div>
+              <div class="metric-value" id="metricAttendance">150</div>
+              <div class="metric-foot">Expected attendance <span class="mini-tag">planning assumption</span></div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">DAILY INGREDIENT CAP <span class="metric-icon icon-green">$</span></div>
+              <div class="metric-value" id="metricBudget">$600</div>
+              <div class="metric-foot">Ingredient spend ceiling</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">MENU VARIETY <span class="metric-icon icon-blue">✳</span></div>
+              <div class="metric-value"><span id="metricCuisineCount">—</span><small> cuisines</small></div>
+              <div class="metric-foot">Across the selected week</div>
+            </article>
+            <article class="metric-card">
+              <div class="metric-label">WEEK ESTIMATE <span class="metric-icon icon-orange">◒</span></div>
+              <div class="metric-value" id="metricWeeklyCost">—</div>
+              <div class="metric-foot">Recipe ingredient estimate</div>
+            </article>
+          </section>
+
+          <section class="workbench-grid">
+            <article class="panel setup-panel">
+              <div class="panel-heading">
+                <div><div class="section-kicker">01 / SERVICE BRIEF</div><h2>Set the kitchen up</h2></div>
+                <button class="text-button" id="resetButton">Reset demo</button>
+              </div>
+              <form id="scenarioForm">
+                <label class="field-label" for="cafeteriaName">Cafeteria name</label>
+                <input class="text-input" id="cafeteriaName" maxlength="80" value="Campus Commons Cafeteria" />
+                <div class="field-row">
+                  <div><label class="field-label" for="attendance">Daily attendance</label><div class="input-with-unit"><input class="text-input" type="number" min="1" max="5000" step="1" id="attendance" value="150" /><span>people</span></div></div>
+                  <div><label class="field-label" for="dailyBudget">Ingredient budget</label><div class="input-with-unit"><span>$</span><input class="text-input" type="number" min="1" step="1" id="dailyBudget" value="600" /></div></div>
+                </div>
+                <div class="field-row">
+                  <div><label class="field-label" for="vegetarianShare">Vegetarian planning share</label><div class="input-with-unit"><input class="text-input" type="number" min="5" max="100" step="5" id="vegetarianShare" value="35" /><span>%</span></div></div>
+                  <div><label class="field-label" for="cuisinePreferences">Cuisine focus <small>optional</small></label><select class="text-input" id="cuisinePreferences"><option value="">Open to all cuisines</option><option>Japanese</option><option>Mexican</option><option>Mediterranean</option><option>Italian</option><option>Indian</option><option>Korean</option><option>Middle Eastern</option></select></div>
+                </div>
+                <details class="advanced-fields">
+                  <summary>Dietary, equipment & stock <span>›</span></summary>
+                  <div class="field-subgroup">
+                    <label class="field-label" for="allergenExclusions">Allergen exclusions <small>comma separated</small></label>
+                    <input class="text-input" id="allergenExclusions" value="peanut" placeholder="peanut, sesame" />
+                    <label class="field-label" for="ingredientExclusions">Ingredient exclusions <small>comma separated</small></label>
+                    <input class="text-input" id="ingredientExclusions" value="" placeholder="mushroom, eggplant" />
+                    <label class="field-label">Kitchen equipment</label>
+                    <div class="check-row">
+                      <label><input type="checkbox" name="equipment" value="oven" checked /> Oven</label>
+                      <label><input type="checkbox" name="equipment" value="stovetop" checked /> Stovetop</label>
+                      <label><input type="checkbox" name="equipment" value="rice cooker" checked /> Rice cooker</label>
+                    </div>
+                    <label class="field-label" for="inventory">On-hand inventory <small>ingredient key=quantity; units in catalog</small></label>
+                    <textarea class="text-input textarea-input" id="inventory" rows="2" placeholder="rice=18, chickpeas=6">rice=18, chickpeas=6, tomato=5, chicken=4, lentils=4</textarea>
+                    <p class="field-hint">Shopping quantities are net of stock on hand. Any shortfall appears on the purchase list.</p>
+                  </div>
+                </details>
+              </form>
+              <div class="constraint-callout"><span class="callout-icon">✓</span><div><strong>Hard constraints stay hard</strong><small>Budget, attendance, equipment and selected exclusions are checked before a menu is shown.</small></div></div>
+            </article>
+
+            <article class="panel taste-panel" id="taste-signals">
+              <div class="panel-heading">
+                <div><div class="section-kicker">02 / DINER SIGNALS</div><h2>Bring a little context</h2></div>
+                <span class="taste-glyph">◉</span>
+              </div>
+              <p class="panel-copy">Use voluntary restaurant preferences to explore dining affinities. Taste signals are aggregate context, never a guess about an individual diner.</p>
+              <div class="mode-switch" role="group" aria-label="Taste signal mode">
+                <button class="mode-tab active" id="sampleModeButton" aria-pressed="true">Sample profile</button>
+                <button class="mode-tab" id="liveModeButton" aria-pressed="false">Live Qloo</button>
+              </div>
+              <div id="sampleProfileFields">
+                <label class="field-label" for="sampleProfile">Demo taste profile</label>
+                <select class="text-input" id="sampleProfile">
+                  <option value="campus">Campus Commons mix</option>
+                  <option value="mediterranean">Mediterranean explorers</option>
+                  <option value="eastAsian">East Asian regulars</option>
+                  <option value="latin">Latin table</option>
+                </select>
+                <div class="profile-preview" id="sampleProfilePreview"></div>
+                <div class="source-note sample-note"><span class="source-label">SAMPLE DATA</span><span>Synthetic profile for the demo. It is not a Qloo API result.</span></div>
+              </div>
+              <div id="liveProfileFields" hidden>
+                <label class="field-label" for="venueNames">Restaurant or dining interests <small>one per line, up to three</small></label>
+                <textarea class="text-input textarea-input live-textarea" id="venueNames" rows="3" placeholder="Olive Garden&#10;Din Tai Fung&#10;Taqueria"></textarea>
+                <div class="source-note live-note"><span class="source-label">SERVER-SIDE KEY</span><span>Live mode requires an event-issued Qloo key configured in the Site runtime. The key never enters this browser.</span></div>
+              </div>
+              <div class="taste-footer">
+                <span class="privacy-icon">⌑</span>
+                <span>No diner names or personal identifiers are requested.</span>
+              </div>
+            </article>
+          </section>
+
+          <section class="section-block plan-section" id="weekly-plan">
+            <div class="section-title-row">
+              <div><div class="section-kicker">03 / FIVE-DAY PLAN</div><h2>Your service week</h2><p class="section-subtitle" id="planSubtitle">Generate a plan to compare operational fit with taste signals.</p></div>
+              <div class="section-actions">
+                <span class="plan-status" id="planStatus"><span class="status-dot"></span>Waiting for a plan</span>
+                <button class="button button-quiet" id="exportButton" disabled>Export shopping list <span>↓</span></button>
+              </div>
+            </div>
+            <div class="plan-empty" id="planEmpty">
+              <div class="empty-illustration"><span>◉</span><span>✦</span><span>▤</span></div>
+              <strong>The kitchen is ready for a plan.</strong>
+              <p>We’ll check constraints, select a five-day menu, verify servings and cost, then make a shopping list.</p>
+              <button class="button button-primary" id="emptyGenerateButton">Generate my weekly menu <span>→</span></button>
+            </div>
+            <div class="loading-card" id="loadingCard" hidden aria-live="polite">
+              <div class="loader-ring"></div><div><strong>Working through the kitchen brief</strong><p id="loadingText">Checking hard constraints…</p></div>
+            </div>
+            <div class="menu-grid" id="menuGrid" hidden></div>
+            <div class="plan-footnote" id="planFootnote" hidden><span>ⓘ</span> Cost estimates use the editable demo price sheet. Ingredient labels and kitchen cross-contact must be checked before service.</div>
+          </section>
+
+          <section class="section-block compare-section" id="compare">
+            <div class="section-title-row compare-header">
+              <div><div class="section-kicker">04 / SIDE-BY-SIDE TEST</div><h2 id="compareTitle">Taste signal advantage</h2><p class="section-subtitle">Same recipes, budget, attendance and operational rules. Only the added dining signal changes.</p></div>
+              <span class="compare-mark">SAME CONSTRAINTS <span>↔</span></span>
+            </div>
+            <details class="weight-controls">
+              <summary>Adjust plan weights <span id="weightSummary">Signal 40 · focus 28 · cost 20 · prep 12</span></summary>
+              <div class="weight-grid">
+                <label><span>Cultural signal <strong id="weightTasteValue">40%</strong></span><input id="weightTaste" type="range" min="0" max="100" value="40" /></label>
+                <label><span>Explicit cuisine focus <strong id="weightExplicitValue">28%</strong></span><input id="weightExplicit" type="range" min="0" max="100" value="28" /></label>
+                <label><span>Affordability <strong id="weightCostValue">20%</strong></span><input id="weightCost" type="range" min="0" max="100" value="20" /></label>
+                <label><span>Preparation time <strong id="weightPrepValue">12%</strong></span><input id="weightPrep" type="range" min="0" max="100" value="12" /></label>
+              </div>
+              <p class="weight-note">Weights guide ranking only. Regenerate after changing them; hard budget, attendance, equipment and dietary rules stay fixed.</p>
+            </details>
+            <div class="sample-disclaimer" id="sampleDisclaimer"><span class="disclaimer-icon">i</span><span>Sample mode uses synthetic taste cues. This comparison does not represent a live Qloo result or measured diner satisfaction.</span></div>
+            <div class="compare-grid" id="compareGrid">
+              <article class="compare-card"><div class="compare-card-top"><span class="compare-index">A</span><div><strong>Constraints only</strong><small>Operational baseline</small></div><span class="compare-badge">BASELINE</span></div><div class="compare-placeholder">Generate the week to compare plans.</div></article>
+              <article class="compare-card accent-card"><div class="compare-card-top"><span class="compare-index">B</span><div><strong>Taste signals included</strong><small id="signalPlanCaption">Sample signal plan</small></div><span class="compare-badge accent-badge">WITH SIGNALS</span></div><div class="compare-placeholder">Generate the week to compare plans.</div></article>
+            </div>
+            <div class="comparison-verdict" id="comparisonVerdict"><span class="verdict-star">✦</span><span>What changed because the signal was included will appear here. If nothing changes, PalateOps will say so.</span></div>
+          </section>
+
+          <section class="lower-grid">
+            <article class="panel procurement-panel" id="procurement">
+              <div class="panel-heading">
+                <div><div class="section-kicker">05 / PROCUREMENT</div><h2>What to bring in</h2></div>
+                <span class="shopping-icon">⌑</span>
+              </div>
+              <p class="panel-copy">Five-day quantities minus on-hand inventory.</p>
+              <div class="shopping-list" id="shoppingList"><div class="muted-empty">Your consolidated list will appear after planning.</div></div>
+              <div class="procurement-total"><span>Estimated to purchase</span><strong id="shoppingTotal">—</strong></div>
+            </article>
+            <article class="panel activity-panel" id="activity">
+              <div class="panel-heading">
+                <div><div class="section-kicker">06 / AGENT TRACE</div><h2>How the plan was made</h2></div>
+                <span class="trace-count" id="traceCount">0 steps</span>
+              </div>
+              <div class="trace-list" id="traceList"><div class="muted-empty">The tool trace appears when a plan runs.</div></div>
+              <button class="button button-shock" id="shockButton" disabled><span class="shock-icon">ϟ</span>Simulate a supply shock</button>
+              <p class="shock-caption">+25% attendance and a 20% chicken price increase, then replan.</p>
+            </article>
+          </section>
+          <footer class="page-footer"><span>PALATEOPS · KITCHEN INTELLIGENCE</span><span>Planning estimates only · Verify supplier labels, pricing and kitchen capacity</span><a href="https://qloo.devpost.com/rules" target="_blank" rel="noreferrer">Hackathon rules ↗</a></footer>
+        </div>
+      </main>
+    </div>
+    <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+    <dialog class="help-dialog" id="helpDialog">
+      <form method="dialog"><button class="dialog-close" aria-label="Close">×</button></form>
+      <div class="section-kicker">ABOUT PALATEOPS</div><h2>Good planning, with receipts.</h2>
+      <p>PalateOps turns a cafeteria brief into a deterministic five-day menu, checks hard constraints, and totals procurement quantities. Live Qloo mode is a server-side integration and requires an authorized event credential. Sample signals are synthetic and clearly labeled.</p>
+      <p>Allergen metadata is a planning screen only. Always verify the final recipe, supplier labels and cross-contact controls with your kitchen team.</p>
+      <a href="https://github.com/zalkabsi/palateops-qloo" target="_blank" rel="noreferrer">Source repository ↗</a>
+    </dialog>
+  </body>
+</html>

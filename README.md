@@ -6,7 +6,7 @@
 
 PalateOps helps cafeteria teams turn attendance, budget, dietary rules and voluntary dining interests into a five-day operational menu. It compares an operational baseline with a taste-signal plan, checks hard constraints, totals estimated ingredient costs and prepares a shopping list.
 
-> The default public demo uses synthetic taste cues. They are labeled and are not Qloo responses. Live Qloo requests require an authorized event credential installed as a server-side Site secret. No live validation has been completed yet.
+> The default public demo uses synthetic taste cues. They are labeled and are not Qloo responses. Live Qloo requests require the event-issued credential and a separately hosted Node.js 22.19+ backend running the Qloo Harness. No live validation has been completed yet.
 
 ## What you can try
 
@@ -26,7 +26,7 @@ The screenshot shows labeled synthetic sample data, not a live Qloo response.
 
 ## How the taste signal works
 
-Sample mode uses deterministic, synthetic profiles and makes no Qloo API call. Live mode sends up to three voluntary dining names to the Worker. The Worker resolves place entities and requests Qloo tag insights with its server-side credential. The planner maps only returned tag labels it can match to recipe cuisines. It does not fabricate Qloo scores or predict diner satisfaction. If no tags map to the catalog, the plan remains operational and the app reports that result.
+Sample mode uses deterministic, synthetic profiles and makes no Qloo API call. Live mode sends up to three voluntary restaurant names to the same-origin Worker. The Worker forwards them to a separate Node.js 22.19+ service running the official Qloo Harness. The browser displays exact place matches for confirmation before the service requests restaurant recommendations and their nested tags. The planner maps only returned tag labels it can match to recipe cuisines. It does not fabricate Qloo scores or predict diner satisfaction. If no tags map to the catalog, the plan remains operational and the app reports that result.
 
 See [the Qloo validation log](docs/QLOO_VALIDATION.md) for official references, the adapter contract and the live-test status.
 
@@ -58,19 +58,21 @@ Requires Node.js 20 or later.
 3. Install a Chromium browser for Playwright if one is not already available, then run npm run test:e2e for browser smoke coverage.
 4. Run npm run preview and open the printed local URL for the sample interface.
 
-The local static preview serves the Sample mode UI. The live Qloo route is available on the deployed Worker, where QLOO_API_KEY must be configured as a secret.
+The local static preview serves Sample mode only. Live Qloo runs through the deployed Site Worker after its backend URL and shared token are configured. Local live testing requires a Worker-compatible runtime configured to proxy to the Node backend.
 
 ## Environment
 
 | Name | Required | Purpose |
 | --- | --- | --- |
-| QLOO_API_KEY | No for Sample mode; required for live mode | Event-issued Qloo credential stored in the Site runtime secret manager |
+| QLOO_API_KEY | No for Sample mode; required for live mode | Event-issued credential stored only in the Qloo backend container's secret manager |
+| QLOO_BACKEND_TOKEN | No for Sample mode; required for live mode | Random shared bearer token stored in the container and Site runtime secret managers |
+| QLOO_BACKEND_URL | No for Sample mode; required for live mode | HTTPS origin of the separately hosted Node backend, stored in the Site runtime |
 
-The adapter uses the documented Qloo search and v2 Insights routes. Review event credential restrictions before enabling direct REST requests; the event's public kit documents its supported harness surfaces.
+The integration uses the hackathon kit's `qloo api search` and `qloo api insights` Harness commands. The Node backend owns the Qloo key; the Site Worker only forwards bounded requests using the shared backend token. See [the Qloo validation log](docs/QLOO_VALIDATION.md) for the dry-run contract and outstanding live checks.
 
 ## Deploy
 
-The Site source manifest is .openai/hosting.json. Build output is written to dist/server/index.js and dist/.openai/hosting.json for the Worker hosting workflow. Configure QLOO_API_KEY in the Site runtime secret store, run npm test, build and publish the saved source version, then verify the public URL and access mode.
+The Site source manifest is .openai/hosting.json. Build output is written to dist/server/index.js and dist/.openai/hosting.json for the Worker hosting workflow. Deploy `qloo-backend/` as a Node.js 22.19+ container, set `QLOO_API_KEY` and `QLOO_BACKEND_TOKEN` there, then configure `QLOO_BACKEND_URL` and the same `QLOO_BACKEND_TOKEN` in the Site runtime. Run `npm test`, build and publish the Site source, then verify the public URL and access mode. Live mode remains unavailable until all three runtime values are set.
 
 Do not set a credential in a browser bundle, localStorage, repository, screenshot, or public demo instructions.
 
@@ -87,7 +89,7 @@ Run npm test for recipe metadata, invalid inputs, serving and cost calculations,
 
 ## Known limitations
 
-- No event key was available when this version was built; live Qloo calls and the three-profile experiment remain pending.
+- No event key or container host was available when this version was built; live Qloo calls and the three-profile experiment remain pending.
 - Qloo cuisine-to-recipe mapping may be empty or ambiguous.
 - Ingredient prices and quantity needs are illustrative. Labor, yield loss, nutrition, equipment throughput and local currency conversion are not modeled.
 - The 35% vegetarian share is a planning assumption, not measured attendance.

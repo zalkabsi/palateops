@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 510" role="img" aria-labelledby="title desc">
   <title id="title">PalateOps architecture</title>
-  <desc id="desc">A browser interface runs a deterministic menu planner, reads an original recipe catalog, verifies hard constraints, and calculates procurement. Live Qloo requests pass through a same-origin Worker with a server-only key. Sample settings are saved in browser local storage.</desc>
+  <desc id="desc">A browser interface runs a deterministic menu planner, reads an original recipe catalog, verifies hard constraints, and calculates procurement. Live Qloo requests pass through a same-origin Worker to a Node.js Qloo Harness container. Sample settings are saved in browser local storage.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
       <path d="M0,0 L0,6 L9,3 z" fill="#527763"/>
@@ -11,7 +11,7 @@
       .line{fill:none;stroke:#527763;stroke-width:3;marker-end:url(#arrow)}.dash{stroke-dasharray:8 7}.small{font:12px Arial,sans-serif;fill:#8a958d}
     </style>
   </defs>
-  <rect class="bg" width="1200" height="510" rx="22"/>
+  <rect class="bg" width="1200" height="610" rx="22"/>
   <text x="48" y="48" class="kicker">PALATEOPS · REQUEST AND PLANNING FLOW</text>
   <rect class="box" x="46" y="102" width="210" height="96" rx="14"/>
   <text x="70" y="140" class="title">Kitchen manager</text><text x="70" y="168" class="sub">Service brief + constraints</text>
@@ -28,14 +28,17 @@
   <path class="line" d="M835 130 H910"/>
   <path class="line" d="M835 168 C870 168 870 234 910 234"/>
   <path class="line" d="M1030 174 V190"/>
-  <rect class="box" x="610" y="340" width="225" height="96" rx="14"/>
-  <text x="636" y="378" class="title">Procurement</text><text x="636" y="406" class="sub">Stock netting + CSV list</text>
-  <rect class="box gold" x="320" y="340" width="220" height="96" rx="14"/>
-  <text x="346" y="378" class="title">Qloo Site Worker</text><text x="346" y="406" class="sub">Key stays server-side</text>
-  <rect class="box blue" x="46" y="340" width="210" height="96" rx="14"/>
-  <text x="70" y="378" class="title">Qloo API</text><text x="70" y="406" class="sub">Resolved dining tags</text>
-  <path class="line" d="M725 198 V340"/>
+  <rect class="box gold" x="320" y="340" width="220" height="90" rx="14"/>
+  <text x="346" y="376" class="title">Site Worker</text><text x="346" y="404" class="sub">HTTPS proxy + token</text>
+  <rect class="box blue" x="610" y="340" width="225" height="90" rx="14"/>
+  <text x="636" y="376" class="title">Qloo Harness</text><text x="636" y="404" class="sub">Node.js 22.19+ container</text>
+  <rect class="box blue" x="910" y="340" width="240" height="90" rx="14"/>
+  <text x="936" y="376" class="title">Qloo API</text><text x="936" y="404" class="sub">Search + Insights</text>
+  <rect class="box" x="910" y="470" width="240" height="90" rx="14"/>
+  <text x="936" y="506" class="title">Procurement</text><text x="936" y="534" class="sub">Stock netting + CSV list</text>
+  <path class="line" d="M835 150 H880 V515 H910"/>
   <path class="line dash" d="M430 198 V340"/>
-  <path class="line" d="M320 388 H256"/>
-  <text x="50" y="472" class="small">Sample mode uses synthetic cues. Live mode uses only returned tags and reports unmapped results without fallback.</text>
+  <path class="line" d="M540 385 H610"/>
+  <path class="line" d="M835 385 H910"/>
+  <text x="50" y="584" class="small">Sample mode uses synthetic cues. Live mode confirms exact place matches, then maps returned tags without fallback.</text>
 </svg>

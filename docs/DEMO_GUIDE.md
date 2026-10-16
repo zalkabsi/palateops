@@ -8,7 +8,7 @@ The ready-to-use Campus Commons scenario opens in Sample mode. It needs no accou
 4. Expand Dietary, equipment & stock, change an exclusion or the daily cap, and regenerate.
 5. Export the consolidated shopping list as CSV.
 6. Simulate a supply shock to add 25% expected attendance and raise chicken prices 20%, then inspect the replan summary.
-7. Choose Live Qloo only after an authorized event key has been set in the Site runtime. Enter one to three dining names. If live calls fail, the app shows an error and does not silently use sample data.
+7. Choose Live Qloo only after the Qloo Harness backend has been deployed and its event key, backend URL and shared token have been configured. Enter one to three public restaurant names. Review the exact place matches before continuing. If live calls fail, the app shows an error and does not silently use sample data.
 
 ## Sample scenario
 
@@ -20,4 +20,4 @@ The ready-to-use Campus Commons scenario opens in Sample mode. It needs no accou
 - Oven, stovetop and rice cooker available
 - Five stock quantities preloaded
 
-The live mode can use up to three voluntary dining names. Do not submit diner names, emails, device IDs or other personal data.
+The live mode can use up to three voluntary public restaurant names. Do not submit diner names, emails, device IDs or other personal data. Live mode is currently unconfigured; the public demo uses Sample mode.

@@ -1,16 +1,17 @@
 const ASSETS = __ASSETS__;
 const RATE_BUCKETS = new Map();
-const QLOO_ORIGIN = "https://api.qloo.com";
+const MAX_BODY_BYTES = 4096;
+const BACKEND_TIMEOUT_MS = 25_000;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ status: "ok", demoMode: "sample", qlooConfigured: Boolean(env.QLOO_API_KEY) }, 200, request);
+      return json({ status: "ok", demoMode: "sample", qlooBackendConfigured: Boolean(env.QLOO_BACKEND_URL && isStrongBackendToken(env.QLOO_BACKEND_TOKEN)) }, 200, request);
     }
-    if (url.pathname === "/api/qloo") {
+    if (url.pathname === "/api/qloo/resolve" || url.pathname === "/api/qloo/signals") {
       if (request.method !== "POST") return json({ error: "Use POST for a live Qloo taste request." }, 405, request);
-      return handleQloo(request, env);
+      return handleQloo(request, env, url.pathname);
     }
     if (request.method !== "GET" && request.method !== "HEAD") return new Response("Method not allowed", { status: 405 });
     const assetPath = url.pathname === "/" ? "/index.html" : url.pathname;
@@ -30,61 +31,54 @@ export default {
   },
 };
 
-async function handleQloo(request, env) {
+async function handleQloo(request, env, path) {
   const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (contentType !== "application/json") {
     return json({ error: "The taste profile request must use application/json." }, 415, request);
   }
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > 4096) return json({ error: "The taste profile request is too large." }, 413, request);
+  if (length > MAX_BODY_BYTES) return json({ error: "The taste profile request is too large." }, 413, request);
   let body;
   try {
-    const rawBody = await readBodyWithLimit(request, 4096);
+    const rawBody = await readBodyWithLimit(request, MAX_BODY_BYTES);
     if (rawBody === null) return json({ error: "The taste profile request is too large." }, 413, request);
     body = JSON.parse(rawBody);
   } catch { return json({ error: "The taste profile request must be valid JSON." }, 400, request); }
-  const venues = normalizeVenues(body?.venues);
-  if (venues.length < 1 || venues.length > 3) {
-    return json({ error: "Enter one to three restaurant names. Only dining interests are accepted." }, 400, request);
+  if (!env.QLOO_BACKEND_URL || !isStrongBackendToken(env.QLOO_BACKEND_TOKEN)) {
+    return json({ error: "Live Qloo mode is not configured. Set the authorized Node backend URL and shared token, or switch to Sample profile." }, 503, request);
   }
-  if (!env.QLOO_API_KEY) {
-    return json({ error: "Live Qloo mode is not configured. Add an authorized event key to the Site runtime, or switch to Sample profile." }, 503, request);
-  }
+  const backendUrl = buildBackendUrl(env.QLOO_BACKEND_URL, path);
+  if (!backendUrl) return json({ error: "The live Qloo backend URL is invalid or must use HTTPS." }, 503, request);
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
   if (!allowRequest(ip)) return json({ error: "Too many live taste requests. Wait a minute and try again." }, 429, request);
-
   try {
-    const resolvedEntities = await Promise.all(venues.map((name) => searchPlace(name, env.QLOO_API_KEY)));
-    const ids = resolvedEntities.map((entity) => entity.id);
-    const insightsUrl = new URL("/v2/insights", QLOO_ORIGIN);
-    insightsUrl.searchParams.set("filter.type", "urn:tag");
-    insightsUrl.searchParams.set("filter.parents.types", "urn:entity:place");
-    insightsUrl.searchParams.set("signal.interests.entities", ids.join(","));
-    insightsUrl.searchParams.set("take", "50");
-    const response = await qlooFetch(insightsUrl, env.QLOO_API_KEY);
-    const data = await parseQlooJson(response);
-    if (!response.ok) return qlooError(response.status);
-    const returnedTags = Array.isArray(data?.results?.tags) ? data.results.tags : [];
-    const tags = returnedTags.slice(0, 100).map((tag) => ({
-      id: String(tag.tag_id || tag.tag_value || "").slice(0, 180),
-      name: String(tag.name || tag.tag_value || "").slice(0, 100),
-      type: String(tag.subtype || tag.type || "").slice(0, 100),
-    })).filter((tag) => tag.name);
-    return json({
-      mode: "live",
-      resolvedEntities,
-      tags,
-      endpoint: "https://api.qloo.com/v2/insights",
-      retrievedAt: new Date().toISOString(),
-      source: "Qloo Insights API",
-      resultCount: returnedTags.length,
-    }, 200, request);
+    if (path.endsWith("/resolve")) {
+      const venues = normalizeVenues(body?.venues);
+      if (venues.error) return json({ error: venues.error }, 400, request);
+      body = { venues: venues.values };
+    } else {
+      const entities = normalizeResolvedEntities(body?.entities);
+      if (entities.error) return json({ error: entities.error }, 400, request);
+      body = { entities: entities.values };
+    }
+    const response = await fetch(backendUrl, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer " + env.QLOO_BACKEND_TOKEN,
+        "x-palateops-client-ip": ip,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
+    });
+    let payload;
+    try { payload = await response.json(); } catch { return json({ error: "The live Qloo backend returned an unreadable response." }, 502, request); }
+    return json(payload, response.status, request);
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      return json({ error: "Qloo took too long to respond. No sample data was substituted." }, 504, request);
+      return json({ error: "The live Qloo backend took too long to respond. No sample data was substituted." }, 504, request);
     }
-    const status = error?.status === 422 ? 422 : error?.status === 429 ? 429 : 502;
-    return json({ error: safeError(error) }, status, request);
+    return json({ error: "The live Qloo backend is unavailable. No sample data was substituted." }, 502, request);
   }
 }
 
@@ -116,56 +110,48 @@ async function readBodyWithLimit(request, maxBytes) {
   return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 }
 
-async function searchPlace(name, apiKey) {
-  const url = new URL("/search", QLOO_ORIGIN);
-  url.searchParams.set("query", name);
-  url.searchParams.set("types", "urn:entity:place");
-  url.searchParams.set("take", "5");
-  const response = await qlooFetch(url, apiKey);
-  const data = await parseQlooJson(response);
-  if (!response.ok) {
-    const error = new Error("Entity search did not succeed.");
-    error.status = response.status;
-    throw error;
-  }
-  const entities = Array.isArray(data?.results?.entities) ? data.results.entities : [];
-  const exact = entities.find((entity) => String(entity.name || "").trim().toLowerCase() === name.toLowerCase());
-  const match = exact || entities[0];
-  const id = match?.entity_id || match?.id;
-  if (!match || !id || !match.name) {
-    const error = new Error("Qloo could not resolve one of the supplied dining names. Check spelling or use a supported restaurant entity.");
-    error.status = 422;
-    throw error;
-  }
-  return { id: String(id).slice(0, 180), name: String(match.name).slice(0, 100), requestedName: name };
-}
-
-async function qlooFetch(url, apiKey) {
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: { "accept": "application/json", "X-Api-Key": apiKey },
-    signal: AbortSignal.timeout(9000),
-  });
-  return response;
-}
-
-async function parseQlooJson(response) {
-  try { return await response.json(); } catch {
-    const error = new Error("Qloo returned an unreadable response.");
-    error.status = response.status;
-    throw error;
-  }
-}
-
-function qlooError(status) {
-  if (status === 401 || status === 403) return json({ error: "Qloo rejected the configured credential. Check the event-issued key and account access." }, 502);
-  if (status === 429) return json({ error: "Qloo rate limit reached. Wait before trying again; no retry was made." }, 429);
-  return json({ error: "Qloo returned an error (HTTP " + status + "). No sample data was substituted." }, 502);
-}
-
 function normalizeVenues(value) {
-  if (!Array.isArray(value)) return [];
-  return [...new Set(value.map((name) => String(name || "").trim().replace(/\s+/g, " ").slice(0, 120)).filter(Boolean))].slice(0, 3);
+  if (!Array.isArray(value)) return { error: "Enter one to three restaurant names." };
+  const names = [];
+  for (const raw of value) {
+    if (typeof raw !== "string") return { error: "Restaurant names must be text." };
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name) continue;
+    if (name.length > 120 || /[\u0000-\u001f\u007f]/.test(name)) return { error: "Each restaurant name must be 120 characters or fewer and contain no control characters." };
+    if (!names.some((item) => item.toLowerCase() === name.toLowerCase())) names.push(name);
+  }
+  if (names.length < 1 || names.length > 3) return { error: "Enter one to three restaurant names." };
+  return { values: names };
+}
+
+function normalizeResolvedEntities(value) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 3) return { error: "Confirm one to three resolved restaurant matches." };
+  const entities = [];
+  for (const raw of value) {
+    const id = typeof raw?.id === "string" ? raw.id.trim() : "";
+    const name = typeof raw?.name === "string" ? raw.name.trim() : "";
+    const requestedName = typeof raw?.requestedName === "string" ? raw.requestedName.trim().slice(0, 120) : name;
+    if (!id || id.length > 180 || !/^[A-Za-z0-9][A-Za-z0-9:_-]*$/.test(id) || !name || name.length > 100) {
+      return { error: "A resolved restaurant match was invalid. Resolve the names again." };
+    }
+    entities.push({ id, name, requestedName, type: String(raw?.type || "urn:entity:place").slice(0, 100) });
+  }
+  return { values: entities };
+}
+
+function buildBackendUrl(base, path) {
+  try {
+    const origin = new URL(base);
+    if (origin.pathname !== "/" || origin.search || origin.hash) return null;
+    const url = new URL(path, origin);
+    const localHttp = url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    if ((url.protocol !== "https:" && !localHttp) || url.username || url.password || url.hash) return null;
+    return url.toString();
+  } catch { return null; }
+}
+
+function isStrongBackendToken(value) {
+  return typeof value === "string" && value.length >= 32;
 }
 
 function allowRequest(ip) {
@@ -178,15 +164,6 @@ function allowRequest(ip) {
     for (const [key, times] of RATE_BUCKETS) if (!times.some((time) => now - time < 60_000)) RATE_BUCKETS.delete(key);
   }
   return true;
-}
-
-function safeError(error) {
-  if (error?.status === 422) return error.message;
-  if (error?.status === 429) return "Qloo rate limit reached. Wait before trying again; no retry was made.";
-  if (error?.status === 401 || error?.status === 403) return "Qloo rejected the configured credential. Check the event-issued key and account access.";
-  return error?.message === "Qloo returned an unreadable response."
-    ? error.message
-    : "The live Qloo request failed. No sample data was substituted.";
 }
 
 function json(body, status = 200, request) {

@@ -14,11 +14,11 @@ PalateOps turns a cafeteria brief into a five-day menu with portion assumptions,
 
 ## How we built it
 
-The application uses a deterministic JavaScript planning engine, an original 32-recipe catalog and a same-origin Cloudflare Worker for an optional server-side Qloo integration. Sample mode uses visibly labeled synthetic cues. Live mode uses a server-only event key, resolves voluntary dining names and requests aggregate tag insights. Recipe quantity and cost calculations are deterministic and are not delegated to a language model.
+The application uses a deterministic JavaScript planning engine, an original 32-recipe catalog and a same-origin Cloudflare Worker that proxies to a separate Node.js 22.19+ service running the Qloo Harness. Sample mode uses visibly labeled synthetic cues. The live path is implemented but not configured or live-validated: it requires an event-issued key, a hosted backend and Site runtime secrets. When enabled, it resolves voluntary public restaurant names, asks the user to confirm exact matches, then requests aggregate insights. Recipe quantity and cost calculations are deterministic and are not delegated to a language model.
 
 ## Challenges
 
-Qloo returns cultural signals, not recipes or a cafeteria demand forecast. PalateOps therefore maps only returned tag names that match its small recipe catalog and reports when no mapping is available. The demo has no live credential yet, so live profile distinctions remain unvalidated.
+Qloo returns cultural signals, not recipes or a cafeteria demand forecast. PalateOps therefore maps only tags returned on recommended places that match its small recipe catalog and reports when no mapping is available. The demo has no live credential or backend host yet, so live profile distinctions remain unvalidated.
 
 ## Accomplishments
 
@@ -38,5 +38,5 @@ Configure an event-issued key, run the three-profile live experiment, validate r
 
 ## Demo and repository
 
-- Demo: https://palateops-qloo.zeynkbsi.chatgpt.site (production deployment succeeded; the Sites access policy is public. The runner could not resolve the hostname for an external HTTP check.)
+- Demo: https://palateops-qloo.zeynkbsi.chatgpt.site (production deployment succeeded; the Sites access policy is public. Sample mode is available; Live Qloo is not configured. The runner could not resolve the hostname for an external HTTP check.)
 - Source: https://github.com/zalkabsi/palateops-qloo (source and MIT license are committed; the repository is still private because the connected GitHub tools do not expose the visibility setting.)

@@ -1,6 +1,6 @@
 import { INGREDIENTS, RECIPES, SAMPLE_PROFILES } from "./recipes.js";
 import { calculateShoppingList, generatePlan, normalizeScenario, summarizePlan, validateScenario, verifyPlan } from "./planner.js";
-import { fetchLiveTasteSignals, sampleSignal } from "./qloo.js";
+import { fetchLiveTasteSignals, resolveLiveTasteEntities, sampleSignal } from "./qloo.js";
 
 const STORE_KEY = "palateops.demo.v1";
 const DEMO_INVENTORY = { rice: 18, chickpeas: 6, tomato: 5, chicken: 4, lentils: 4 };
@@ -158,9 +158,16 @@ async function generate() {
     loadingText(state.mode === "live" ? "Resolving dining interests with Qloo…" : "Loading the labeled sample profile…");
     let signal;
     if (state.mode === "live") {
-      const venues = byId("venueNames").value.split(/[\n,]/).map((name) => name.trim()).filter(Boolean).slice(0, 3);
-      signal = await fetchLiveTasteSignals(venues);
-      trace.push({ title: "Retrieve live Qloo taste tags", detail: signal.provenance.entityIds.length + " restaurant entities resolved · " + signal.provenance.tagCount + " tag results · server-side key", icon: "◉" });
+      const venues = byId("venueNames").value.split(/[\n,]/).map((name) => name.trim()).filter(Boolean);
+      const resolvedEntities = await resolveLiveTasteEntities(venues);
+      trace.push({ title: "Resolve dining interests", detail: resolvedEntities.map((entity) => entity.requestedName + " → " + entity.name).join(" · "), icon: "◉" });
+      setTrace(trace);
+      if (!confirmResolvedEntities(resolvedEntities)) {
+        throw new Error("No Qloo insights were requested. Edit the restaurant names or stay in Sample mode.");
+      }
+      loadingText("Retrieving taste signals with the Qloo Harness…");
+      signal = await fetchLiveTasteSignals(resolvedEntities);
+      trace.push({ title: "Retrieve Qloo restaurant insights", detail: signal.provenance.recommendationCount + " recommended places · " + signal.provenance.tagCount + " unique returned tags · Qloo Harness backend", icon: "◉" });
     } else {
       signal = sampleSignal(state.sampleProfile);
       trace.push({ title: "Load synthetic sample profile", detail: signal.cuisineSignals.join(" · ") + " · no Qloo request made", icon: "◉" });
@@ -228,6 +235,14 @@ async function generate() {
     loadingCard.hidden = true;
     setButtonsDisabled(false);
   }
+}
+
+function confirmResolvedEntities(entities) {
+  const rows = entities.map((entity) => "• " + entity.requestedName + " → " + entity.name).join("\n");
+  return window.confirm(
+    "Review the Qloo restaurant matches before using them as taste signals.\n\n" + rows +
+    "\n\nContinue with these matches? No insights request is made if you cancel.",
+  );
 }
 
 function renderAll() {

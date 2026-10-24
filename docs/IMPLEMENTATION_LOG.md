@@ -34,7 +34,7 @@
 - Node HTTP smoke check: `/healthz` returned 200 without returning the dummy API key; unauthenticated live request returned 401. No Qloo request was made.
 - Harness command construction: dry-run checked against version 0.1.26; no live API request was made.
 - Live Qloo request: pending an event-issued credential and Node backend host.
-- GitHub main commit `6a1ba72` has the same source tree as Site v4 commit `1f9a517`. Tested improvements are prepared in the separate `codex/palateops-agent-submission-20261024` submission branch. The repository remains private: the connected GitHub tools do not expose visibility settings, and the authenticated CLI cannot reach `api.github.com` under the enforced network policy. A prior privileged Actions workaround was rejected during review; change visibility through supported repository owner settings.
+- Submission PR [#1](https://github.com/zalkabsi/palateops-qloo/pull/1) was merged on 2026-10-24 as commit `63ea850`. Its tested source was committed on `codex/palateops-agent-submission-20261024`; all 44 source files were compared byte for byte with the verified workspace before committing. The initial GitHub base `6a1ba72` has the same tree as Site v4 commit `1f9a517`. The repository remains private: the connected GitHub tools do not expose visibility settings, and the authenticated CLI cannot reach `api.github.com` under the enforced network policy. A prior privileged Actions workaround was rejected during review; change visibility through supported repository owner settings.
 - Public hosted deployment: the Site is public; its version history is the source of truth for published builds. External HTTP reachability is not verified because this runner cannot resolve the published hostname.
 
 ## Remaining work

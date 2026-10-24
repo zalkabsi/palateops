@@ -27,6 +27,7 @@ test("demo optimizer returns five days with hard constraints satisfied", () => {
 test("daily menus do not repeat an identical recipe within the day", () => {
   const plan = generatePlan(demo);
   assert.ok(plan.days.every((day) => new Set(day.items.map((item) => item.recipeId)).size === day.items.length));
+  assert.equal(new Set(plan.days.map((day) => day.items.map((item) => item.recipeId).sort().join("|"))).size, 5);
 });
 
 test("allergen exclusions are preserved as hard constraints", () => {
@@ -53,6 +54,13 @@ test("invalid attendance and budget values are rejected", () => {
   assert.ok(validateScenario(normalizeScenario({ attendance: -1 })).length > 0);
   assert.ok(validateScenario(normalizeScenario({ dailyBudget: -3 })).length > 0);
   assert.ok(validateScenario(normalizeScenario({ vegetarianShare: 0 })).length > 0);
+});
+
+test("daily kitchen serving capacity is a hard planning constraint", () => {
+  const scenario = normalizeScenario({ attendance: 188, kitchenCapacity: 180 });
+  assert.ok(validateScenario(scenario).some((error) => error.includes("exceeds the stated daily kitchen serving capacity")));
+  assert.equal(generatePlan(scenario).status, "invalid");
+  assert.ok(validateScenario(normalizeScenario({ attendance: 150, kitchenCapacity: 0 })).some((error) => error.includes("capacity must be a whole number")));
 });
 
 test("infeasible budget is explicit and never returns an over-budget menu", () => {
@@ -87,6 +95,55 @@ test("plan verification enforces the configured vegetarian share", () => {
   const result = verifyPlan(plan, scenario);
   assert.equal(result.valid, false);
   assert.ok(result.errors.some((error) => error.includes("vegetarian serving share")));
+});
+
+test("plan verification independently checks excluded ingredients and unavailable equipment", () => {
+  const ingredientScenario = normalizeScenario({ ingredientExclusions: ["chicken"] });
+  const ingredientPlan = structuredClone(generatePlan(demo));
+  const chickenRecipe = RECIPES.find((recipe) => recipe.id === "chicken-donburi");
+  replaceMealRecipe(ingredientPlan.days[0].items.find((item) => !item.vegetarian), chickenRecipe, ingredientScenario);
+  const ingredientResult = verifyPlan(ingredientPlan, ingredientScenario);
+  assert.ok(ingredientResult.errors.some((error) => error.includes("excluded ingredient")));
+
+  const equipmentScenario = normalizeScenario({ equipment: ["stovetop", "rice cooker"] });
+  const equipmentPlan = structuredClone(generatePlan(demo));
+  const ovenRecipe = RECIPES.find((recipe) => recipe.vegetarian && recipe.equipment.includes("oven"));
+  replaceMealRecipe(equipmentPlan.days[0].items.find((item) => item.vegetarian), ovenRecipe, equipmentScenario);
+  const equipmentResult = verifyPlan(equipmentPlan, equipmentScenario);
+  assert.ok(equipmentResult.errors.some((error) => error.includes("unavailable kitchen equipment")));
+});
+
+test("verification recomputes attendance and cost instead of trusting reported totals", () => {
+  const plan = structuredClone(generatePlan(demo));
+  plan.days[0].items[0].servings += 1;
+  plan.days[0].totalCost = 0;
+  const result = verifyPlan(plan, demo);
+  assert.ok(result.errors.some((error) => error.includes("does not cover planned attendance")));
+  assert.ok(result.errors.some((error) => error.includes("incorrect daily cost total")));
+});
+
+test("procurement rejects stale or edited ingredient details", () => {
+  const plan = structuredClone(generatePlan(demo));
+  const item = plan.days[0].items[0];
+  item.ingredients[Object.keys(item.ingredients)[0]] = 0;
+  assert.throws(() => calculateShoppingList(plan, demo), /Cannot calculate procurement from an invalid plan/);
+});
+
+test("verification and procurement reject plans not marked feasible", () => {
+  const plan = structuredClone(generatePlan(demo));
+  plan.status = "infeasible";
+  const result = verifyPlan(plan, demo);
+  assert.ok(result.errors.includes("The plan is not marked feasible."));
+  assert.throws(() => calculateShoppingList(plan, demo), /Cannot calculate procurement from an invalid plan/);
+});
+
+test("verification rejects an identical daily menu repeated across weekdays", () => {
+  const plan = structuredClone(generatePlan(demo));
+  plan.days[1].items = structuredClone(plan.days[0].items);
+  plan.days[1].totalCost = plan.days[0].totalCost;
+  plan.totalCost = plan.days.reduce((sum, day) => sum + day.totalCost, 0);
+  const result = verifyPlan(plan, demo);
+  assert.ok(result.errors.some((error) => error.includes("repeats an identical daily menu")));
 });
 
 test("invalid stock and price multiplier values are normalized safely", () => {
@@ -132,3 +189,17 @@ test("planning weights are configurable and normalized to one hundred", () => {
   assert.equal(plan.status, "feasible");
   assert.deepEqual(plan.weights, { tasteSignal: 100, explicitPreference: 0, affordability: 0, preparation: 0 });
 });
+
+function replaceMealRecipe(item, recipe, scenario) {
+  const costPerServing = recipeCostPerServing(recipe, scenario.priceMultipliers);
+  Object.assign(item, {
+    recipeId: recipe.id,
+    name: recipe.name,
+    cuisine: recipe.cuisine,
+    vegetarian: recipe.vegetarian,
+    allergens: [...recipe.allergens],
+    ingredients: { ...recipe.ingredients },
+    costPerServing: Math.round(costPerServing * 100) / 100,
+    cost: Math.round(costPerServing * item.servings * 100) / 100,
+  });
+}

@@ -1,6 +1,6 @@
 # Qloo validation log
 
-**Last updated:** 2026-10-16
+**Last updated:** 2026-10-24
 **Status:** Harness command shape dry-run checked; live service behavior not validated
 **Conclusion:** The integration is not ready for live use until the backend is hosted, the event credential and shared token are configured, and the three-profile experiment is completed.
 
@@ -51,11 +51,22 @@ After deployment and authorized key setup, run these non-personal profiles with 
 
 For each profile, save the exact names the user confirmed, resolved Qloo place IDs, returned recommendations and nested tags, any recipe-catalog mapping, and empty/error behavior. Compare only observed labels. Do not describe aggregate tags as individual diner preferences or satisfaction predictions.
 
+### Repeatable evidence command
+
+The two-step runner is implemented and fixture-tested; it has not been run against live Qloo. It uses `QLOO_BACKEND_URL` and `QLOO_BACKEND_TOKEN` from the environment, never command-line credential values.
+
+1. Copy `docs/live-profiles.example.json` to a working file and fill each empty venue list with one to three public restaurant names. The empty template cannot issue a request.
+2. Run `npm run validate:live -- --resolve profiles.json --out resolution.json`. This stage requests Search matches only. Missing or ambiguous matches produce a correction record.
+3. Review the exact names and IDs in `resolution.json`. Correct the inputs and resolve again if needed.
+4. After reviewing all matches, run `npm run validate:live -- --confirm resolution.json --out evidence.json`. This explicit confirmation requests Insights and records observed tags, recipe mappings and comparable deterministic menus for all profiles.
+
+Output files are created without overwriting an existing file. Failure records remain failures; Sample mode is never substituted. The evidence distinguishes successful API calls from observed cuisine distinctions. Review the actual mappings and menus before making a quality claim. This command validates Qloo and recipe mapping; record a separate real AI run after configuring the model service described in [AGENT.md](AGENT.md).
+
 ## Current findings
 
 - The prior direct Worker-to-Qloo REST implementation did not follow the current hackathon deployment guidance and assumed an unsupported top-level Insights tag collection. It has been replaced by the Node Harness backend path.
 - Command construction was dry-run checked against Harness version `0.1.26` on 2026-10-16.
-- No event-issued Qloo key or container host is available in this workspace. No live Qloo request has been made.
+- No event-issued Qloo key or public backend host is configured. The Node container build and a network-isolated health/fixture smoke check passed on 2026-10-24; this does not validate a live Qloo request.
 - The public Site has no `QLOO_BACKEND_URL` or `QLOO_BACKEND_TOKEN` configured. Live mode currently returns a setup error and Sample mode remains available.
 - The supported public hostname could not be externally checked from this runner because of its network DNS/CONNECT restriction.
 

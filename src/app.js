@@ -1,6 +1,7 @@
 import { INGREDIENTS, RECIPES, SAMPLE_PROFILES } from "./recipes.js";
 import { calculateShoppingList, generatePlan, normalizeScenario, summarizePlan, validateScenario, verifyPlan } from "./planner.js";
 import { fetchLiveTasteSignals, resolveLiveTasteEntities, sampleSignal } from "./qloo.js";
+import { requestAgentPlan } from "./agent.js";
 
 const STORE_KEY = "palateops.demo.v1";
 const DEMO_INVENTORY = { rice: 18, chickpeas: 6, tomato: 5, chicken: 4, lentils: 4 };
@@ -13,6 +14,13 @@ const state = {
   scenario: null,
   busy: false,
   shock: null,
+  history: [],
+  currentHistoryId: null,
+  trace: [],
+  entities: [],
+  agentSummary: "",
+  agentAvailable: false,
+  preferredMethod: "rules",
 };
 
 const byId = (id) => document.getElementById(id);
@@ -26,6 +34,8 @@ renderProfilePreview();
 updateWeightLabels();
 bindEvents();
 renderSummary();
+renderHistoryControls();
+loadAgentAvailability();
 
 function bindEvents() {
   generateButton.addEventListener("click", generate);
@@ -48,6 +58,10 @@ function bindEvents() {
     markPlanOutdated();
     saveForm();
   });
+  byId("planningMethod").addEventListener("change", () => {
+    markPlanOutdated();
+    saveForm();
+  });
   document.querySelectorAll(".weight-grid input").forEach((node) => {
     node.addEventListener("input", () => {
       markPlanOutdated();
@@ -57,7 +71,9 @@ function bindEvents() {
   });
   byId("resetButton").addEventListener("click", resetDemo);
   byId("shockButton").addEventListener("click", simulateShock);
-  byId("exportButton").addEventListener("click", exportShoppingList);
+  byId("restoreHistoryButton").addEventListener("click", restoreSelectedHistory);
+  byId("undoShockButton").addEventListener("click", undoSupplyShock);
+  byId("exportButton").addEventListener("click", exportWeeklyPlan);
   byId("helpButton").addEventListener("click", () => byId("helpDialog").showModal());
   byId("venueNames").addEventListener("input", () => {
     markPlanOutdated();
@@ -74,10 +90,31 @@ function bindEvents() {
   });
 }
 
+async function loadAgentAvailability() {
+  try {
+    const response = await fetch("/api/health", { signal: AbortSignal.timeout(4000) });
+    state.agentAvailable = response.ok && (await response.json()).agentConfigured === true;
+  } catch { state.agentAvailable = false; }
+  byId("agentMethodOption").disabled = !state.agentAvailable;
+  byId("planningMethodHelp").textContent = state.agentAvailable
+    ? "Shares the kitchen brief with the AI service. Every menu still passes independent rule checks."
+    : "Rules planning is ready. The AI agent is unavailable in this deployment.";
+  if (state.agentAvailable && state.preferredMethod === "agent" && !state.busy && !state.tastePlan) {
+    byId("planningMethod").value = "agent";
+    saveForm();
+  }
+}
+
 function setMode(mode) {
   const changed = state.mode !== mode;
   state.mode = mode;
-  const sample = mode === "sample";
+  renderMode();
+  if (changed) markPlanOutdated();
+  saveForm();
+}
+
+function renderMode() {
+  const sample = state.mode === "sample";
   byId("sampleModeButton").classList.toggle("active", sample);
   byId("liveModeButton").classList.toggle("active", !sample);
   byId("sampleModeButton").setAttribute("aria-pressed", String(sample));
@@ -90,8 +127,6 @@ function setMode(mode) {
   byId("compareTitle").textContent = sample ? "Taste signal advantage" : "Qloo advantage";
   const signalPlanCaption = byId("signalPlanCaption");
   if (signalPlanCaption) signalPlanCaption.textContent = sample ? "Synthetic sample signal plan" : "Live Qloo tag signals";
-  if (changed) markPlanOutdated();
-  saveForm();
 }
 
 function readScenario() {
@@ -99,6 +134,7 @@ function readScenario() {
   const scenario = normalizeScenario({
     cafeteriaName: byId("cafeteriaName").value,
     attendance: byId("attendance").value,
+    kitchenCapacity: byId("kitchenCapacity").value,
     dailyBudget: byId("dailyBudget").value,
     vegetarianShare: Number(byId("vegetarianShare").value) / 100,
     allergenExclusions: byId("allergenExclusions").value,
@@ -129,6 +165,7 @@ async function generate() {
     state.tastePlan = null;
     state.signal = null;
     state.scenario = scenario;
+    state.currentHistoryId = null;
     clearPlanPanels();
     setPlanStatus("Needs attention", "error");
     showPlanMessage("Check the planning inputs", errors[0], "Adjust the fields, then try again.");
@@ -139,6 +176,9 @@ async function generate() {
   state.tastePlan = null;
   state.signal = null;
   state.scenario = scenario;
+  state.currentHistoryId = null;
+  state.agentSummary = "";
+  state.entities = [];
   clearPlanPanels();
   state.busy = true;
   setButtonsDisabled(true);
@@ -150,8 +190,10 @@ async function generate() {
   setTrace([]);
   const trace = [];
   try {
+    const useAgent = byId("planningMethod").value === "agent";
+    if (useAgent && !state.agentAvailable) throw new Error("The AI planner is unavailable. Choose the rules planner.");
     loadingText("Checking hard constraints…");
-    trace.push({ title: "Validate service brief", detail: scenario.attendance + " expected covers · $" + money(scenario.dailyBudget) + " daily cap · dietary and equipment rules", icon: "✓" });
+    trace.push({ title: "Validate service brief", detail: scenario.attendance + " expected covers · " + money(scenario.dailyBudget) + " daily cap · dietary and equipment rules", icon: "✓" });
     setTrace(trace);
     await pause(260);
 
@@ -165,12 +207,20 @@ async function generate() {
       if (!confirmResolvedEntities(resolvedEntities)) {
         throw new Error("No Qloo insights were requested. Edit the restaurant names or stay in Sample mode.");
       }
-      loadingText("Retrieving taste signals with the Qloo Harness…");
-      signal = await fetchLiveTasteSignals(resolvedEntities);
-      trace.push({ title: "Retrieve Qloo restaurant insights", detail: signal.provenance.recommendationCount + " recommended places · " + signal.provenance.tagCount + " unique returned tags · Qloo Harness backend", icon: "◉" });
-    } else {
+      state.entities = resolvedEntities;
+      if (!useAgent) {
+        loadingText("Retrieving taste signals with the Qloo Harness…");
+        signal = await fetchLiveTasteSignals(resolvedEntities);
+        trace.push({ title: "Retrieve Qloo restaurant insights", detail: signal.provenance.recommendationCount + " recommended places · " + signal.provenance.tagCount + " unique returned tags · Qloo Harness backend", icon: "◉" });
+      }
+    } else if (!useAgent) {
       signal = sampleSignal(state.sampleProfile);
       trace.push({ title: "Load synthetic sample profile", detail: signal.cuisineSignals.join(" · ") + " · no Qloo request made", icon: "◉" });
+    }
+    if (useAgent) {
+      loadingText("The AI agent is selecting and checking planning tools…");
+      installAgentResult(await requestAgentPlan(agentInput(scenario)), scenario, trace);
+      return;
     }
     setTrace(trace);
     await pause(220);
@@ -211,6 +261,7 @@ async function generate() {
     state.scenario = scenario;
     renderAll();
     setPlanStatus("5 days checked", "ready");
+    recordPlanHistory(state.shock ? "Replanned scenario" : state.mode === "live" ? "Live Qloo plan" : "Sample plan");
     if (state.mode === "live" && signal.cuisineSignals.length === 0) {
       toast("Qloo returned tags, but none mapped to the recipe catalog’s cuisine labels. The plan stays grounded in operational rules.");
     } else {
@@ -237,6 +288,30 @@ async function generate() {
   }
 }
 
+function agentInput(scenario) {
+  return { scenario, weights: readWeights(), mode: state.mode, sampleProfile: state.sampleProfile, entities: cloneData(state.entities) };
+}
+
+function installAgentResult(result, scenario, priorTrace) {
+  setTrace(priorTrace.concat(result.trace));
+  state.signal = result.signal;
+  state.scenario = scenario;
+  state.agentSummary = result.summary;
+  if (result.status !== "feasible") {
+    state.baseline = null;
+    state.tastePlan = null;
+    setPlanStatus("No feasible plan", "error");
+    showInfeasible(result.errors[0]);
+    return;
+  }
+  state.baseline = result.baseline;
+  state.tastePlan = result.tastePlan;
+  renderAll();
+  setPlanStatus(state.shock ? "AI replan verified" : "AI plan verified", "ready");
+  recordPlanHistory(state.shock ? "AI supply shock replan" : "AI tool plan");
+  toast("The AI agent completed its tools; both plans passed independent constraint checks.");
+}
+
 function confirmResolvedEntities(entities) {
   const rows = entities.map((entity) => "• " + entity.requestedName + " → " + entity.name).join("\n");
   return window.confirm(
@@ -248,6 +323,7 @@ function confirmResolvedEntities(entities) {
 function renderAll() {
   renderSummary();
   renderMenu(state.tastePlan, state.scenario);
+  renderDashboard(state.tastePlan, state.scenario);
   renderComparison(state.baseline, state.tastePlan);
   renderShopping(state.tastePlan, state.scenario);
   byId("planEmpty").hidden = true;
@@ -255,7 +331,40 @@ function renderAll() {
   byId("planFootnote").hidden = false;
   byId("exportButton").disabled = false;
   byId("shockButton").disabled = false;
-  byId("planSubtitle").textContent = "Up to two options per day · " + state.tastePlan.totalServings.toLocaleString() + " planned servings · " + (state.mode === "live" ? "live Qloo tags and recipe rules" : "sample signals and recipe rules");
+  byId("planSubtitle").textContent = "Up to two options per day · " + state.tastePlan.totalServings.toLocaleString() + " planned servings · " + (state.mode === "live" ? "live Qloo tags and recipe rules" : "sample signals and recipe rules") + (state.agentSummary ? " · AI tool agent" : "");
+  byId("agentSummary").hidden = !state.agentSummary;
+  byId("agentSummary").textContent = state.agentSummary ? "Agent note: " + state.agentSummary : "";
+}
+
+function renderDashboard(plan, scenario) {
+  const dashboard = byId("dashboard");
+  if (!plan || plan.status !== "feasible" || !scenario) {
+    dashboard.hidden = true;
+    return;
+  }
+  dashboard.hidden = false;
+  byId("dailySpendCap").textContent = "Cap " + money(scenario.dailyBudget);
+  byId("dailySpendChart").innerHTML = plan.days.map((day) => {
+    const pct = Math.min(100, Math.round((day.totalCost / scenario.dailyBudget) * 100));
+    return '<div class="progress-row"><div class="progress-row-head"><span>' + escapeHtml(day.day) + '</span><strong>' + money(day.totalCost) + '</strong></div>' +
+      '<progress class="chart-progress" max="100" value="' + pct + '" aria-label="' + escapeHtml(day.day + ": " + pct + "% of daily cap") + '"></progress></div>';
+  }).join("");
+
+  const cuisineTotals = {};
+  for (const item of plan.days.flatMap((day) => day.items)) cuisineTotals[item.cuisine] = (cuisineTotals[item.cuisine] || 0) + item.servings;
+  const cuisines = Object.entries(cuisineTotals).sort((first, second) => second[1] - first[1]).slice(0, 6);
+  const maxCuisineServings = Math.max(1, ...cuisines.map(([, servings]) => servings));
+  byId("cuisineMixChart").innerHTML = cuisines.length
+    ? cuisines.map(([cuisine, servings]) => '<div class="progress-row"><div class="progress-row-head"><span>' + escapeHtml(cuisine) + '</span><strong>' + servings.toLocaleString() + '</strong></div>' +
+      '<progress class="chart-progress" max="' + maxCuisineServings + '" value="' + servings + '" aria-label="' + escapeHtml(cuisine + ": " + servings + " planned servings") + '"></progress></div>').join("")
+    : '<p class="chart-empty">No cuisine data is available for this plan.</p>';
+
+  const purchases = calculateShoppingList(plan, scenario).filter((line) => line.estimatedCost > 0).slice(0, 5);
+  const maxPurchaseCost = Math.max(1, ...purchases.map((line) => line.estimatedCost));
+  byId("purchaseCostChart").innerHTML = purchases.length
+    ? purchases.map((line) => '<div class="progress-row"><div class="progress-row-head"><span>' + escapeHtml(line.name) + '</span><strong>' + money(line.estimatedCost) + '</strong></div>' +
+      '<progress class="chart-progress" max="' + maxPurchaseCost + '" value="' + line.estimatedCost + '" aria-label="' + escapeHtml(line.name + ": " + money(line.estimatedCost) + " estimated purchase cost") + '"></progress></div>').join("")
+    : '<p class="chart-empty">On-hand inventory covers the planned purchases.</p>';
 }
 
 function renderMenu(plan, scenario) {
@@ -352,8 +461,119 @@ function renderTrace(rows) {
 }
 
 function setTrace(rows) {
+  state.trace = rows.map((item) => ({ ...item }));
   byId("traceCount").textContent = rows.length + (rows.length === 1 ? " step" : " steps");
   byId("traceList").innerHTML = rows.map((item) => '<div class="trace-row"><span class="trace-step">' + escapeHtml(item.icon) + '</span><div><strong>' + escapeHtml(item.title) + '</strong><small>' + escapeHtml(item.detail) + '</small></div></div>').join("");
+}
+
+function recordPlanHistory(title) {
+  if (!state.baseline || !state.tastePlan || !state.scenario) return;
+  const createdAt = new Date();
+  const id = createdAt.getTime() + "-" + Math.random().toString(36).slice(2, 8);
+  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(createdAt);
+  state.history.unshift({
+    id,
+    label: title + " · " + state.scenario.attendance + " covers · " + time,
+    scenario: cloneData(state.scenario),
+    baseline: cloneData(state.baseline),
+    tastePlan: cloneData(state.tastePlan),
+    signal: cloneData(state.signal),
+    shock: cloneData(state.shock),
+    mode: state.mode,
+    sampleProfile: state.sampleProfile,
+    venueNames: byId("venueNames").value,
+    weights: readWeights(),
+    trace: cloneData(state.trace),
+    entities: cloneData(state.entities),
+    agentSummary: state.agentSummary,
+    planningMethod: byId("planningMethod").value,
+  });
+  state.history = state.history.slice(0, 6);
+  state.currentHistoryId = id;
+  renderHistoryControls();
+}
+
+function renderHistoryControls() {
+  const controls = byId("historyControls");
+  if (!controls) return;
+  const select = byId("planHistory");
+  const restoreButton = byId("restoreHistoryButton");
+  const undoButton = byId("undoShockButton");
+  controls.hidden = state.history.length === 0;
+  select.replaceChildren();
+  state.history.forEach((entry) => {
+    const option = document.createElement("option");
+    option.value = entry.id;
+    option.textContent = entry.label;
+    select.append(option);
+  });
+  select.value = state.currentHistoryId || state.history[0]?.id || "";
+  restoreButton.disabled = state.busy || !state.history.some((entry) => entry.id === select.value);
+  undoButton.hidden = !canUndoShock();
+  undoButton.disabled = state.busy || !canUndoShock();
+}
+
+function canUndoShock() {
+  const previousId = state.shock?.previousHistoryId;
+  return Boolean(previousId && state.history.some((entry) => entry.id === previousId));
+}
+
+function restoreSelectedHistory() {
+  restorePlanHistory(byId("planHistory").value);
+}
+
+function undoSupplyShock() {
+  if (!canUndoShock()) return;
+  restorePlanHistory(state.shock.previousHistoryId);
+  toast("Restored the plan from before the supply shock.");
+}
+
+function restorePlanHistory(id) {
+  const entry = state.history.find((item) => item.id === id);
+  if (!entry || state.busy) return;
+  const scenario = cloneData(entry.scenario);
+  byId("cafeteriaName").value = scenario.cafeteriaName;
+  byId("attendance").value = scenario.attendance;
+  byId("kitchenCapacity").value = scenario.kitchenCapacity;
+  byId("dailyBudget").value = scenario.dailyBudget;
+  byId("vegetarianShare").value = Math.round(scenario.vegetarianShare * 100);
+  byId("allergenExclusions").value = scenario.allergenExclusions.join(", ");
+  byId("ingredientExclusions").value = scenario.ingredientExclusions.join(", ");
+  byId("inventory").value = Object.entries(scenario.inventory).map(([key, amount]) => key + "=" + amount).join(", ");
+  byId("cuisinePreferences").value = scenario.cuisinePreferences[0] || "";
+  form.querySelectorAll('input[name="equipment"]').forEach((node) => { node.checked = scenario.equipment.includes(node.value); });
+  byId("weightTaste").value = entry.weights.tasteSignal;
+  byId("weightExplicit").value = entry.weights.explicitPreference;
+  byId("weightCost").value = entry.weights.affordability;
+  byId("weightPrep").value = entry.weights.preparation;
+  byId("venueNames").value = entry.venueNames;
+  state.mode = entry.mode;
+  state.sampleProfile = entry.sampleProfile;
+  byId("sampleProfile").value = entry.sampleProfile;
+  state.scenario = scenario;
+  state.baseline = cloneData(entry.baseline);
+  state.tastePlan = cloneData(entry.tastePlan);
+  state.signal = cloneData(entry.signal);
+  state.shock = cloneData(entry.shock);
+  state.trace = cloneData(entry.trace);
+  state.entities = cloneData(entry.entities || []);
+  state.agentSummary = entry.agentSummary || "";
+  byId("planningMethod").value = entry.planningMethod || "rules";
+  state.currentHistoryId = entry.id;
+  renderMode();
+  renderProfilePreview();
+  updateWeightLabels();
+  renderAll();
+  setTrace(state.trace);
+  setPlanStatus(entry.shock ? "Replanned after supply shock" : "Plan restored", "ready");
+  setButtonsDisabled(false);
+  renderHistoryControls();
+  saveForm();
+}
+
+function cloneData(value) {
+  if (value == null) return value;
+  return typeof structuredClone === "function" ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 }
 
 function renderProfilePreview() {
@@ -391,8 +611,11 @@ function showPlanMessage(title, reason, guidance) {
 }
 
 function clearPlanPanels() {
+  byId("agentSummary").hidden = true;
+  byId("agentSummary").textContent = "";
   byId("menuGrid").innerHTML = "";
   byId("menuGrid").hidden = true;
+  byId("dashboard").hidden = true;
   byId("planFootnote").hidden = true;
   byId("planSubtitle").textContent = "Generate a plan to compare operational fit with taste signals.";
   byId("metricCuisineCount").textContent = "—";
@@ -423,6 +646,9 @@ function markPlanOutdated() {
   state.signal = null;
   state.scenario = null;
   state.shock = null;
+  state.currentHistoryId = null;
+  state.agentSummary = "";
+  state.entities = [];
   clearPlanPanels();
   setPlanStatus("Settings changed", "error");
   setTrace([]);
@@ -431,18 +657,21 @@ function markPlanOutdated() {
     "One or more settings changed after this plan was created.",
     hadShock ? "The simulated supply shock was cleared with the old plan. Generate a fresh plan." : "Generate again to update the menu, comparison and shopping list.",
   );
+  renderHistoryControls();
 }
 
 function simulateShock() {
   if (!state.tastePlan || !state.scenario || state.busy) return;
   const beforeAttendance = state.scenario.attendance;
   const beforeCost = state.tastePlan.totalCost;
+  const previousHistoryId = state.currentHistoryId;
   const attendance = Math.ceil(beforeAttendance * 1.25);
   const priceMultipliers = { ...state.scenario.priceMultipliers, chicken: (Number(state.scenario.priceMultipliers.chicken) || 1) * 1.2 };
-  state.shock = { beforeAttendance, afterAttendance: attendance, beforeCost, priceMultipliers };
+  state.shock = { beforeAttendance, afterAttendance: attendance, beforeCost, priceMultipliers, previousHistoryId };
   byId("attendance").value = attendance;
   const scenario = normalizeScenario({ ...state.scenario, attendance, priceMultipliers });
   state.scenario = scenario;
+  saveForm();
   renderSummary();
   setTrace([{ title: "Apply simulated supply shock", detail: "Attendance " + beforeAttendance + " → " + attendance + " · chicken ingredient price +20%", icon: "ϟ" }]);
   generateWithExistingSignal(scenario);
@@ -452,25 +681,41 @@ async function generateWithExistingSignal(scenario) {
   state.baseline = null;
   state.tastePlan = null;
   state.scenario = scenario;
+  state.currentHistoryId = null;
   clearPlanPanels();
   state.busy = true;
   setButtonsDisabled(true);
   loadingCard.hidden = false;
   planEmpty.hidden = true;
   byId("menuGrid").hidden = true;
+  byId("dashboard").hidden = true;
   loadingText("Replanning around the new service load…");
+  const trace = cloneData(state.trace);
+  state.agentSummary = "";
   try {
+    if (byId("planningMethod").value === "agent") {
+      loadingText("The AI agent is replanning around the supply shock…");
+      installAgentResult(await requestAgentPlan(agentInput(scenario)), scenario, trace);
+      return;
+    }
     await pause(220);
     const weights = readWeights();
+    trace.push({ title: "Re-optimize operational baseline", detail: "Recalculate recipe choices, portions and daily costs with the shock applied", icon: "↗" });
+    setTrace(trace);
     const baseline = generatePlan(scenario, { weights });
+    trace.push({ title: "Re-optimize taste-signal plan", detail: "Use the same constraints and retained taste signals for a comparable replan", icon: "◉" });
+    setTrace(trace);
     const tastePlan = generatePlan(scenario, { signal: state.signal, weights });
     const validation = tastePlan.status === "feasible" ? verifyPlan(tastePlan, scenario) : { valid: false, errors: tastePlan.errors || [] };
+    trace.push({ title: "Verify revised plan", detail: validation.valid ? "Attendance, cost, exclusions and portions passed" : validation.errors.join(" "), icon: validation.valid ? "✓" : "!" });
+    setTrace(trace);
     if (baseline.status !== "feasible" || tastePlan.status !== "feasible" || !validation.valid) {
       state.baseline = null;
       state.tastePlan = null;
       setPlanStatus("Shock is infeasible", "error");
       showInfeasible(validation.errors[0] || baseline.errors?.[0] || "The increased attendance cannot be served under the current budget and restrictions.");
-      setTrace([{ title: "Replanning stopped safely", detail: validation.errors[0] || baseline.errors?.[0] || "No feasible plan was found.", icon: "!" }]);
+      trace.push({ title: "Replanning stopped safely", detail: validation.errors[0] || baseline.errors?.[0] || "No feasible plan was found.", icon: "!" });
+      setTrace(trace);
       return;
     }
     state.baseline = baseline;
@@ -478,6 +723,7 @@ async function generateWithExistingSignal(scenario) {
     state.scenario = scenario;
     renderAll();
     setPlanStatus("Replanned after supply shock", "ready");
+    recordPlanHistory("Supply shock replan");
     toast("Plan rebuilt for " + scenario.attendance.toLocaleString() + " covers with a 20% chicken price increase.");
   } catch (error) {
     const message = error instanceof Error ? error.message : "The supply shock replan could not be completed.";
@@ -485,30 +731,50 @@ async function generateWithExistingSignal(scenario) {
     state.tastePlan = null;
     clearPlanPanels();
     setPlanStatus("Replan needs attention", "error");
-    setTrace([{ title: "Replanning stopped safely", detail: message, icon: "!" }]);
+    setTrace(trace.concat([{ title: "Replanning stopped safely", detail: message, icon: "!" }]));
     showPlanMessage("Could not replan the supply shock", message, "Try generating the plan again.");
     toast(message);
   } finally {
     state.busy = false;
     loadingCard.hidden = true;
     setButtonsDisabled(false);
+    renderHistoryControls();
   }
 }
 
-function exportShoppingList() {
+function exportWeeklyPlan() {
   if (!state.tastePlan || !state.scenario) return;
   const list = calculateShoppingList(state.tastePlan, state.scenario);
-  const rows = [["Ingredient", "Buy quantity", "Unit", "Estimated cost"]];
-  for (const line of list) rows.push([line.name, line.buy, line.unit, line.estimatedCost.toFixed(2)]);
+  const purchaseTotal = list.reduce((sum, line) => sum + line.estimatedCost, 0);
+  const averagePerServing = state.tastePlan.totalCost / state.tastePlan.totalServings;
+  const rows = [["Section", "Day", "Item", "Cuisine", "Servings", "Quantity", "Unit", "Estimated cost"]];
+  rows.push(["Cost summary", "", "Cafeteria", "", "", state.scenario.cafeteriaName, "", ""]);
+  rows.push(["Cost summary", "", "Planning days", "", "", state.tastePlan.days.length, "days", ""]);
+  rows.push(["Cost summary", "", "Total planned servings", "", "", state.tastePlan.totalServings, "servings", ""]);
+  rows.push(["Cost summary", "", "Weekly recipe ingredient estimate", "", "", "", "", state.tastePlan.totalCost.toFixed(2)]);
+  rows.push(["Cost summary", "", "Average recipe cost per serving", "", "", "", "", averagePerServing.toFixed(2)]);
+  rows.push(["Cost summary", "", "Estimated purchasing total", "", "", "", "", purchaseTotal.toFixed(2)]);
+  rows.push(["Cost summary", "", "Daily ingredient cap", "", "", "", "", state.scenario.dailyBudget.toFixed(2)]);
+  rows.push(["Cost summary", "", "Daily kitchen serving capacity", "", "", state.scenario.kitchenCapacity, "servings", ""]);
+  rows.push([]);
+  rows.push(["Weekly menu"]);
+  rows.push(["Section", "Day", "Recipe", "Cuisine", "Servings", "", "", "Estimated cost"]);
+  for (const day of state.tastePlan.days) {
+    for (const item of day.items) rows.push(["Menu", day.day, item.name, item.cuisine, item.servings, "", "", item.cost.toFixed(2)]);
+  }
+  rows.push([]);
+  rows.push(["Shopping list"]);
+  rows.push(["Section", "", "Ingredient", "", "", "Buy quantity", "Unit", "Estimated cost"]);
+  for (const line of list) rows.push(["Procurement", "", line.name, "", "", line.buy, line.unit, line.estimatedCost.toFixed(2)]);
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "palateops-shopping-list.csv";
+  link.download = "palateops-weekly-plan.csv";
   link.click();
   URL.revokeObjectURL(url);
-  toast("Shopping list exported as CSV.");
+  toast("Weekly menu, cost summary and shopping list exported as CSV.");
 }
 
 function csvCell(value) {
@@ -526,10 +792,18 @@ function resetDemo() {
   state.signal = null;
   state.scenario = null;
   state.shock = null;
+  state.history = [];
+  state.currentHistoryId = null;
+  state.trace = [];
+  state.entities = [];
+  state.agentSummary = "";
+  state.preferredMethod = "rules";
+  byId("planningMethod").value = "rules";
   setMode("sample");
   byId("sampleProfile").value = "campus";
   byId("cafeteriaName").value = "Campus Commons Cafeteria";
   byId("attendance").value = 150;
+  byId("kitchenCapacity").value = 200;
   byId("dailyBudget").value = 600;
   byId("vegetarianShare").value = 35;
   byId("allergenExclusions").value = "peanut";
@@ -543,6 +817,7 @@ function resetDemo() {
   byId("venueNames").value = "";
   form.querySelectorAll('input[name="equipment"]').forEach((node) => { node.checked = true; });
   byId("menuGrid").hidden = true;
+  byId("dashboard").hidden = true;
   byId("planFootnote").hidden = true;
   planEmpty.hidden = false;
   byId("planEmpty").innerHTML = '<div class="empty-illustration"><span>◉</span><span>✦</span><span>▤</span></div><strong>The kitchen is ready for a plan.</strong><p>We’ll check constraints, select a five-day menu, verify servings and cost, then make a shopping list.</p><button class="button button-primary" id="emptyGenerateButton">Generate my weekly menu <span>→</span></button>';
@@ -557,6 +832,7 @@ function resetDemo() {
   renderProfilePreview();
   updateWeightLabels();
   renderSummary();
+  renderHistoryControls();
   saveForm();
 }
 
@@ -566,15 +842,17 @@ function hydrateForm() {
   if (saved) {
     byId("cafeteriaName").value = saved.cafeteriaName || "Campus Commons Cafeteria";
     byId("attendance").value = saved.attendance ?? 150;
+    byId("kitchenCapacity").value = saved.kitchenCapacity ?? 200;
     byId("dailyBudget").value = saved.dailyBudget ?? 600;
     byId("vegetarianShare").value = saved.vegetarianShare ?? 35;
-    byId("allergenExclusions").value = saved.allergenExclusions || "peanut";
+    byId("allergenExclusions").value = saved.allergenExclusions ?? "peanut";
     byId("ingredientExclusions").value = saved.ingredientExclusions || "";
     byId("inventory").value = saved.inventoryText || "";
     byId("cuisinePreferences").value = saved.cuisinePreference || "";
     byId("venueNames").value = saved.venueNames || "";
     state.mode = saved.mode === "live" ? "live" : "sample";
     state.sampleProfile = SAMPLE_PROFILES[saved.sampleProfile] ? saved.sampleProfile : "campus";
+    state.preferredMethod = saved.planningMethod === "agent" ? "agent" : "rules";
     byId("sampleProfile").value = state.sampleProfile;
     if (Array.isArray(saved.equipment)) {
       form.querySelectorAll('input[name="equipment"]').forEach((node) => { node.checked = saved.equipment.includes(node.value); });
@@ -593,6 +871,7 @@ function saveForm() {
   const saved = {
     cafeteriaName: byId("cafeteriaName").value,
     attendance: byId("attendance").value,
+    kitchenCapacity: byId("kitchenCapacity").value,
     dailyBudget: byId("dailyBudget").value,
     vegetarianShare: byId("vegetarianShare").value,
     allergenExclusions: byId("allergenExclusions").value,
@@ -604,6 +883,7 @@ function saveForm() {
     mode: state.mode,
     sampleProfile: state.sampleProfile,
     weights: readWeights(),
+    planningMethod: byId("planningMethod").value,
   };
   try { localStorage.setItem(STORE_KEY, JSON.stringify(saved)); } catch {}
 }
@@ -614,9 +894,11 @@ function setButtonsDisabled(disabled) {
   if (currentEmptyButton) currentEmptyButton.disabled = disabled;
   form.querySelectorAll("input, select, textarea").forEach((node) => { node.disabled = disabled; });
   document.querySelectorAll(".weight-grid input").forEach((node) => { node.disabled = disabled; });
-  ["sampleModeButton", "liveModeButton", "sampleProfile", "venueNames", "resetButton"].forEach((id) => { byId(id).disabled = disabled; });
+  ["sampleModeButton", "liveModeButton", "sampleProfile", "venueNames", "resetButton", "planningMethod"].forEach((id) => { byId(id).disabled = disabled; });
   byId("exportButton").disabled = disabled || !state.tastePlan;
   byId("shockButton").disabled = disabled || !state.tastePlan;
+  byId("restoreHistoryButton").disabled = disabled || !state.history.length;
+  byId("undoShockButton").disabled = disabled || !canUndoShock();
 }
 
 function readWeights() {

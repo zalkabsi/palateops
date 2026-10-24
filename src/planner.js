@@ -4,6 +4,7 @@ export function normalizeScenario(input = {}) {
   return {
     cafeteriaName: cleanText(input.cafeteriaName, "Campus Commons Cafeteria", 80),
     attendance: Number(input.attendance ?? 150),
+    kitchenCapacity: Number(input.kitchenCapacity ?? 5000),
     dailyBudget: Number(input.dailyBudget ?? 600),
     vegetarianShare: Number(input.vegetarianShare ?? 0.35),
     allergenExclusions: normalizeList(input.allergenExclusions ?? ["peanut"]),
@@ -19,6 +20,11 @@ export function validateScenario(scenario) {
   const errors = [];
   if (!Number.isInteger(scenario.attendance) || scenario.attendance < 1 || scenario.attendance > 5000) {
     errors.push("Attendance must be a whole number from 1 to 5,000.");
+  }
+  if (!Number.isInteger(scenario.kitchenCapacity) || scenario.kitchenCapacity < 1 || scenario.kitchenCapacity > 5000) {
+    errors.push("Daily kitchen serving capacity must be a whole number from 1 to 5,000.");
+  } else if (Number.isInteger(scenario.attendance) && scenario.attendance > scenario.kitchenCapacity) {
+    errors.push("Attendance exceeds the stated daily kitchen serving capacity.");
   }
   if (!Number.isFinite(scenario.dailyBudget) || scenario.dailyBudget <= 0) {
     errors.push("Daily ingredient budget must be greater than zero.");
@@ -44,15 +50,19 @@ export function recipeCostPerServing(recipe, multipliers = {}) {
 
 function isEligible(recipe, scenario) {
   const excludedAllergen = recipe.allergens.some((allergen) => scenario.allergenExclusions.includes(allergen));
-  const excludedIngredient = Object.keys(recipe.ingredients).some((ingredient) =>
+  const excludedIngredient = hasExcludedIngredient(recipe, scenario);
+  const missingEquipment = recipe.equipment.some((item) => !scenario.equipment.includes(item));
+  return !excludedAllergen && !excludedIngredient && !missingEquipment && Number.isFinite(recipeCostPerServing(recipe, scenario.priceMultipliers));
+}
+
+function hasExcludedIngredient(recipe, scenario) {
+  return Object.keys(recipe.ingredients).some((ingredient) =>
     scenario.ingredientExclusions.some((term) => {
       const needle = term.replace(/[^a-z0-9]/g, "");
       const searchable = (ingredient + " " + (INGREDIENTS[ingredient]?.name || "")).toLowerCase().replace(/[^a-z0-9]/g, "");
       return needle && searchable.includes(needle);
     }),
   );
-  const missingEquipment = recipe.equipment.some((item) => !scenario.equipment.includes(item));
-  return !excludedAllergen && !excludedIngredient && !missingEquipment && Number.isFinite(recipeCostPerServing(recipe, scenario.priceMultipliers));
 }
 
 function candidatePairs(scenario, recipes) {
@@ -75,7 +85,12 @@ function candidatePairs(scenario, recipes) {
       }
     }
   }
-  return pairs;
+  const unique = new Map();
+  for (const pair of pairs) {
+    const signature = pair.ids.slice().sort().join("|");
+    if (!unique.has(signature)) unique.set(signature, pair);
+  }
+  return [...unique.values()];
 }
 
 function signalMatches(recipe, signal) {
@@ -156,10 +171,14 @@ export function generatePlan(scenarioInput, options = {}) {
   if (pairs.length === 0) {
     return { status: "infeasible", errors: ["No two-option daily menu can meet attendance and budget while including a vegetarian option."], days: [] };
   }
-  const history = { cuisines: new Set(), dishes: new Set() };
+  const history = { cuisines: new Set(), dishes: new Set(), menus: new Set() };
   const days = [];
   for (const dayName of WEEKDAYS) {
-    const ranked = pairs
+    const availablePairs = pairs.filter((pair) => !history.menus.has(pair.ids.slice().sort().join("|")));
+    if (availablePairs.length === 0) {
+      return { status: "infeasible", errors: ["The eligible recipes cannot form five distinct daily menus under the selected constraints."], days: [] };
+    }
+    const ranked = availablePairs
       .map((pair) => ({ pair, score: pairScore(pair, scenario, options.signal, weights, history) }))
       .sort((a, b) => b.score - a.score || a.pair.cost - b.pair.cost || a.pair.ids.join().localeCompare(b.pair.ids.join()));
     const selected = ranked[0].pair;
@@ -179,6 +198,7 @@ export function generatePlan(scenarioInput, options = {}) {
       history.dishes.add(item.recipe.id);
       history.cuisines.add(normalizeCuisine(item.recipe.cuisine));
     }
+    history.menus.add(selected.ids.slice().sort().join("|"));
     days.push({ day: dayName, items, totalServings: items.reduce((n, item) => n + item.servings, 0), totalCost: roundMoney(selected.cost) });
   }
   const plan = {
@@ -190,7 +210,7 @@ export function generatePlan(scenarioInput, options = {}) {
     signal: options.signal || null,
     weights: Object.fromEntries(Object.entries(weights).map(([key, value]) => [key, Math.round(value * 100)])),
   };
-  const validation = verifyPlan(plan, scenario);
+  const validation = verifyPlan(plan, scenario, { recipes });
   return validation.valid ? plan : { status: "infeasible", errors: validation.errors, days: [], validation };
 }
 
@@ -203,24 +223,85 @@ function normalizeWeights(input = {}) {
   return Object.fromEntries(Object.entries(source).map(([key, value]) => [key, value / denominator]));
 }
 
-export function verifyPlan(plan, scenarioInput) {
+export function verifyPlan(plan, scenarioInput, options = {}) {
   const scenario = normalizeScenario(scenarioInput);
+  const recipes = Array.isArray(options.recipes) ? options.recipes : RECIPES;
+  const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
   const errors = [];
+  errors.push(...validateScenario(scenario));
+  if (plan?.status !== "feasible") errors.push("The plan is not marked feasible.");
   if (!plan || !Array.isArray(plan.days) || plan.days.length !== 5) errors.push("The plan must contain five days.");
-  for (const day of plan?.days || []) {
-    if (day.totalServings !== scenario.attendance) errors.push(day.day + " does not cover planned attendance.");
-    if (day.totalCost > scenario.dailyBudget + 0.01) errors.push(day.day + " exceeds the daily ingredient budget.");
-    if (!day.items.some((item) => item.vegetarian)) errors.push(day.day + " has no vegetarian option.");
-    const vegetarianServings = day.items.filter((item) => item.vegetarian).reduce((sum, item) => sum + item.servings, 0);
-    if (vegetarianServings !== requiredVegetarianServings(scenario)) errors.push(day.day + " does not meet the planned vegetarian serving share.");
-    if (day.items.length < 1 || day.items.length > 2 || day.items.some((item) => !Number.isInteger(item.servings) || item.servings < 1)) {
-      errors.push(day.day + " must have one or two options with positive whole-number servings.");
+  let weeklyCost = 0;
+  let weeklyServings = 0;
+  const menuSignatures = new Set();
+  for (let index = 0; index < (plan?.days || []).length; index += 1) {
+    const day = plan.days[index];
+    const label = typeof day?.day === "string" ? day.day : "Day " + (index + 1);
+    if (day?.day !== WEEKDAYS[index]) errors.push(label + " is out of order or has an invalid day name.");
+    const items = Array.isArray(day?.items) ? day.items : [];
+    if (!Array.isArray(day?.items)) errors.push(label + " must contain a list of menu options.");
+    if (items.length < 1 || items.length > 2) errors.push(label + " must have one or two options.");
+
+    let dayServings = 0;
+    let vegetarianServings = 0;
+    let dayCost = 0;
+    const menuIds = [];
+    for (const item of items) {
+      if (!Number.isInteger(item?.servings) || item.servings < 1) {
+        errors.push(label + " options must have positive whole-number servings.");
+        continue;
+      }
+      dayServings += item.servings;
+      const recipe = recipeById.get(item.recipeId);
+      if (!recipe) {
+        errors.push(label + " contains an unknown recipe.");
+        continue;
+      }
+      menuIds.push(recipe.id);
+      if (recipe.vegetarian) vegetarianServings += item.servings;
+      if (item.name !== recipe.name || item.cuisine !== recipe.cuisine || item.vegetarian !== recipe.vegetarian) {
+        errors.push(label + " contains recipe details that do not match the catalog.");
+      }
+      if (!sameStringSet(item.allergens, recipe.allergens) || !sameNumberRecord(item.ingredients, recipe.ingredients)) {
+        errors.push(label + " contains safety or ingredient details that do not match the catalog.");
+      }
+      if (recipe.allergens.some((allergen) => scenario.allergenExclusions.includes(allergen))) {
+        errors.push(label + " contains an excluded allergen.");
+      }
+      if (hasExcludedIngredient(recipe, scenario)) errors.push(label + " contains an excluded ingredient.");
+      if (recipe.equipment.some((equipment) => !scenario.equipment.includes(equipment))) {
+        errors.push(label + " requires unavailable kitchen equipment.");
+      }
+
+      const costPerServing = recipeCostPerServing(recipe, scenario.priceMultipliers);
+      const expectedItemCost = roundMoney(costPerServing * item.servings);
+      if (!Number.isFinite(costPerServing) || !Number.isFinite(item.costPerServing) || Math.abs(item.costPerServing - roundMoney(costPerServing)) > 0.01 || !Number.isFinite(item.cost) || Math.abs(item.cost - expectedItemCost) > 0.01) {
+        errors.push(label + " contains a recipe cost that does not match the current price assumptions.");
+      }
+      dayCost += costPerServing * item.servings;
     }
-    const forbidden = day.items.flatMap((item) => item.allergens).filter((allergen) => scenario.allergenExclusions.includes(allergen));
-    if (forbidden.length) errors.push(day.day + " contains an excluded allergen.");
-    const menuIds = day.items.map((item) => item.recipeId);
-    if (new Set(menuIds).size !== menuIds.length) errors.push(day.day + " repeats the same recipe.");
+
+    if (new Set(menuIds).size !== menuIds.length) errors.push(label + " repeats the same recipe.");
+    const menuSignature = menuIds.slice().sort().join("|");
+    if (menuSignatures.has(menuSignature)) errors.push(label + " repeats an identical daily menu.");
+    menuSignatures.add(menuSignature);
+    if (dayServings !== scenario.attendance || day?.totalServings !== dayServings) {
+      errors.push(label + " does not cover planned attendance.");
+    }
+    if (vegetarianServings !== requiredVegetarianServings(scenario)) {
+      errors.push(label + " does not meet the planned vegetarian serving share.");
+    }
+    const expectedDayCost = roundMoney(dayCost);
+    if (!Number.isFinite(day?.totalCost) || Math.abs(day.totalCost - expectedDayCost) > 0.01) {
+      errors.push(label + " has an incorrect daily cost total.");
+    }
+    if (expectedDayCost > scenario.dailyBudget + 0.01) errors.push(label + " exceeds the daily ingredient budget.");
+    weeklyCost += expectedDayCost;
+    weeklyServings += dayServings;
   }
+  if (Number.isFinite(plan?.totalCost) && Math.abs(plan.totalCost - roundMoney(weeklyCost)) > 0.01) errors.push("The weekly cost total is incorrect.");
+  else if (!Number.isFinite(plan?.totalCost)) errors.push("The weekly cost total is missing or invalid.");
+  if (plan?.totalServings !== weeklyServings) errors.push("The weekly serving total is incorrect.");
   return { valid: errors.length === 0, errors };
 }
 
@@ -228,12 +309,17 @@ function requiredVegetarianServings(scenario) {
   return Math.min(scenario.attendance, Math.max(1, Math.round(scenario.attendance * scenario.vegetarianShare)));
 }
 
-export function calculateShoppingList(plan, scenarioInput) {
+export function calculateShoppingList(plan, scenarioInput, options = {}) {
   const scenario = normalizeScenario(scenarioInput);
+  const recipes = Array.isArray(options.recipes) ? options.recipes : RECIPES;
+  const validation = verifyPlan(plan, scenario, { recipes });
+  if (!validation.valid) throw new Error("Cannot calculate procurement from an invalid plan: " + validation.errors.join(" "));
+  const recipeById = new Map(recipes.map((recipe) => [recipe.id, recipe]));
   const required = {};
   for (const day of plan?.days || []) {
     for (const item of day.items) {
-      for (const [key, amount] of Object.entries(item.ingredients)) {
+      const recipe = recipeById.get(item.recipeId);
+      for (const [key, amount] of Object.entries(recipe.ingredients)) {
         required[key] = (required[key] || 0) + amount * item.servings;
       }
     }
@@ -281,6 +367,20 @@ function normalizeMultipliers(value) {
     const multiplier = Number(amount);
     return [key, Number.isFinite(multiplier) && multiplier >= 0 ? multiplier : 1];
   }));
+}
+
+function sameStringSet(first, second) {
+  if (!Array.isArray(first) || !Array.isArray(second)) return false;
+  const left = [...new Set(first)].sort();
+  const right = [...new Set(second)].sort();
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function sameNumberRecord(first, second) {
+  if (!first || typeof first !== "object" || Array.isArray(first) || !second || typeof second !== "object" || Array.isArray(second)) return false;
+  const left = Object.keys(first).sort();
+  const right = Object.keys(second).sort();
+  return left.length === right.length && left.every((key, index) => key === right[index] && Number.isFinite(first[key]) && Math.abs(first[key] - second[key]) < 0.000001);
 }
 
 function normalizeList(value) {

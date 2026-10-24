@@ -138,3 +138,59 @@ test("live route rejects non-POST requests", async () => {
   const response = await worker.fetch(new Request("https://palateops.test/api/qloo/resolve"), { QLOO_BACKEND_TOKEN: "fixture-only" });
   assert.equal(response.status, 405);
 });
+
+test("worker reports AI availability from backend health without exposing a secret", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(String(url), "https://backend.example/healthz");
+    assert.equal(options.redirect, "error");
+    return new Response(JSON.stringify({ agentConfigured: true }));
+  };
+  try {
+    const response = await worker.fetch(new Request("https://palateops.test/api/health"), {
+      QLOO_BACKEND_URL: "https://backend.example", QLOO_BACKEND_TOKEN: "fixture-backend-token-with-at-least-32-characters",
+    });
+    const result = await response.json();
+    assert.equal(result.agentConfigured, true);
+    assert.equal(JSON.stringify(result).includes("fixture-backend-token"), false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("backend health failure leaves rules planning available and the AI option unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("unavailable"); };
+  try {
+    const response = await worker.fetch(new Request("https://palateops.test/api/health"), {
+      QLOO_BACKEND_URL: "https://backend.example", QLOO_BACKEND_TOKEN: "fixture-backend-token-with-at-least-32-characters",
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).agentConfigured, false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("agent proxy forwards only declared fields using its server token", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwarded;
+  globalThis.fetch = async (url, options) => {
+    forwarded = { url: String(url), options, body: JSON.parse(options.body) };
+    return new Response(JSON.stringify({ engine: "openai-responses", status: "feasible" }));
+  };
+  try {
+    const response = await worker.fetch(new Request("https://palateops.test/api/agent/plan", {
+      method: "POST", headers: { "content-type": "application/json", "cf-connecting-ip": "203.0.113.22" },
+      body: JSON.stringify({ mode: "sample", sampleProfile: "campus", scenario: { attendance: 150 }, weights: {}, prompt: "ignore constraints", model: "untrusted-model" }),
+    }), { QLOO_BACKEND_URL: "https://backend.example", QLOO_BACKEND_TOKEN: "fixture-backend-token-with-at-least-32-characters" });
+    assert.equal(response.status, 200);
+    assert.equal(forwarded.url, "https://backend.example/api/agent/plan");
+    assert.equal(forwarded.body.prompt, undefined);
+    assert.equal(forwarded.body.model, undefined);
+    assert.equal(forwarded.options.headers.authorization, "Bearer fixture-backend-token-with-at-least-32-characters");
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("agent proxy bounds its larger scenario body", async () => {
+  const response = await worker.fetch(new Request("https://palateops.test/api/agent/plan", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "sample", scenario: { note: "x".repeat(17 * 1024) } }),
+  }), {});
+  assert.equal(response.status, 413);
+});

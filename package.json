@@ -7,6 +7,7 @@
     "build": "node scripts/build.mjs",
     "test": "npm run build && node --test",
     "test:e2e": "node tests/e2e.mjs",
+    "validate:live": "node scripts/validate-live.mjs",
     "preview": "node scripts/preview.mjs"
   },
   "engines": {

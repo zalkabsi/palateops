@@ -1,9 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import { pathToFileURL } from "node:url";
+import { AgentRequestError, isAgentConfigured, normalizeAgentInput, runPlanningAgent } from "./agent.mjs";
 
 const MAX_BODY_BYTES = 4096;
+const MAX_AGENT_BODY_BYTES = 16 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 512 * 1024;
 const COMMAND_TIMEOUT_MS = 12_000;
 const RATE_LIMIT = 10;
@@ -13,21 +16,25 @@ const HARNESS_VERSION = "0.1.26";
 export function createQlooBackendHandler({
   env = process.env,
   runHarness = runHarnessCommand,
+  modelFetch = fetch,
   now = () => new Date(),
   clock = () => Date.now(),
 } = {}) {
   const rateBuckets = new Map();
+  let activeAgentRuns = 0;
+  let agentStarts = [];
 
   return async function handle(request) {
     const url = new URL(request.url);
     if (url.pathname === "/healthz" && request.method === "GET") {
-      return json({ status: "ok", qlooConfigured: Boolean(env.QLOO_API_KEY && isStrongBackendToken(env.QLOO_BACKEND_TOKEN)), harnessVersion: HARNESS_VERSION });
+      return json({ status: "ok", qlooConfigured: Boolean(env.QLOO_API_KEY && isStrongBackendToken(env.QLOO_BACKEND_TOKEN)), agentConfigured: Boolean(isStrongBackendToken(env.QLOO_BACKEND_TOKEN) && isAgentConfigured(env)), harnessVersion: HARNESS_VERSION });
     }
-    if (url.pathname !== "/api/qloo/resolve" && url.pathname !== "/api/qloo/signals") {
+    const agentRequest = url.pathname === "/api/agent/plan";
+    if (!agentRequest && url.pathname !== "/api/qloo/resolve" && url.pathname !== "/api/qloo/signals") {
       return json({ error: "Not found." }, 404);
     }
     if (request.method !== "POST") return json({ error: "Use POST for Qloo requests." }, 405);
-    if (!isStrongBackendToken(env.QLOO_BACKEND_TOKEN) || !env.QLOO_API_KEY) {
+    if (!isStrongBackendToken(env.QLOO_BACKEND_TOKEN) || (!agentRequest && !env.QLOO_API_KEY)) {
       return json({ error: "The Qloo Harness backend is not configured." }, 503);
     }
     if (!isAuthorized(request.headers.get("authorization"), env.QLOO_BACKEND_TOKEN)) {
@@ -38,10 +45,25 @@ export function createQlooBackendHandler({
       return json({ error: "Too many live taste requests. Wait a minute and try again." }, 429);
     }
 
-    const parsed = await readJsonRequest(request);
+    const parsed = await readJsonRequest(request, agentRequest ? MAX_AGENT_BODY_BYTES : MAX_BODY_BYTES);
     if (parsed.error) return json({ error: parsed.error }, parsed.status);
 
     try {
+      if (agentRequest) {
+        const input = normalizeAgentInput(parsed.value);
+        if (!isAgentConfigured(env)) return json({ error: "The AI planner is not configured. Choose the rules planner or configure the model service." }, 503);
+        const nowMs = clock();
+        agentStarts = agentStarts.filter((time) => nowMs - time < 60 * 60 * 1000);
+        if (activeAgentRuns >= 2 || agentStarts.length >= 30) return json({ error: "The AI planner is at its service limit. Try again later or use the rules planner." }, 429);
+        agentStarts.push(nowMs);
+        activeAgentRuns += 1;
+        try {
+          return json(await runPlanningAgent(input, {
+            env, modelFetch,
+            loadLiveSignal: (entities) => fetchTasteSignals(entities, runHarness, env, now),
+          }));
+        } finally { activeAgentRuns -= 1; }
+      }
       if (url.pathname === "/api/qloo/resolve") {
         const names = normalizeVenueNames(parsed.value?.venues);
         if (names.error) return json({ error: names.error }, 400);
@@ -60,10 +82,11 @@ export function createQlooBackendHandler({
       const result = await fetchTasteSignals(entities.values, runHarness, env, now);
       return json(result);
     } catch (error) {
-      const status = error instanceof HarnessRequestError ? error.status : 502;
-      const message = error instanceof HarnessRequestError
+      const knownError = error instanceof HarnessRequestError || error instanceof AgentRequestError;
+      const status = knownError ? error.status : 502;
+      const message = knownError
         ? error.message
-        : "The Qloo Harness request failed. No sample data was substituted.";
+        : agentRequest ? "The AI planning request failed. No unverified plan was returned." : "The Qloo Harness request failed. No sample data was substituted.";
       return json({ error: message }, status);
     }
   };
@@ -211,14 +234,14 @@ function normalizeResolvedEntities(value) {
   return { values: entities };
 }
 
-async function readJsonRequest(request) {
+async function readJsonRequest(request, maxBytes = MAX_BODY_BYTES) {
   const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (contentType !== "application/json") return { status: 415, error: "The Qloo request must use application/json." };
   const contentLength = Number(request.headers.get("content-length") || 0);
-  if (contentLength > MAX_BODY_BYTES) return { status: 413, error: "The Qloo request is too large." };
+  if (contentLength > maxBytes) return { status: 413, error: "The planning request is too large." };
   try {
-    const text = await readBodyWithLimit(request, MAX_BODY_BYTES);
-    if (text === null) return { status: 413, error: "The Qloo request is too large." };
+    const text = await readBodyWithLimit(request, maxBytes);
+    if (text === null) return { status: 413, error: "The planning request is too large." };
     return { value: JSON.parse(text) };
   } catch {
     return { status: 400, error: "The Qloo request must be valid JSON." };
@@ -300,7 +323,9 @@ function json(body, status = 200) {
 export function runHarnessCommand(args, { env = process.env, timeoutMs = COMMAND_TIMEOUT_MS, maxOutputBytes = MAX_COMMAND_OUTPUT_BYTES } = {}) {
   const command = env.QLOO_CLI_BIN || "qloo";
   const childEnv = {};
-  for (const key of ["PATH", "HOME", "TMPDIR", "TEMP", "NO_COLOR", "CI", "QLOO_API_KEY", "QLOO_HOME"]) {
+  for (const key of ["PATH", "HOME", "TMPDIR", "TEMP", "NO_COLOR", "CI", "QLOO_API_KEY", "QLOO_HOME",
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+    "NODE_EXTRA_CA_CERTS", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_USE_ENV_PROXY"]) {
     if (env[key] !== undefined) childEnv[key] = env[key];
   }
   return new Promise((resolve, reject) => {

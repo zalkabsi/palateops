@@ -26,6 +26,7 @@
         <nav class="primary-nav">
           <a class="nav-link active" href="#overview"><span class="nav-icon">◫</span>Overview</a>
           <a class="nav-link" href="#weekly-plan"><span class="nav-icon">▤</span>Menu planner<span class="nav-count">5</span></a>
+          <a class="nav-link" href="#dashboard"><span class="nav-icon">▥</span>Dashboard</a>
           <a class="nav-link" href="#taste-signals"><span class="nav-icon">◉</span>Taste signals</a>
           <a class="nav-link" href="#procurement"><span class="nav-icon">⌑</span>Procurement</a>
           <a class="nav-link" href="#activity"><span class="nav-icon">↗</span>Agent activity</a>
@@ -108,6 +109,8 @@
                 <details class="advanced-fields">
                   <summary>Dietary, equipment & stock <span>›</span></summary>
                   <div class="field-subgroup">
+                    <label class="field-label" for="kitchenCapacity">Daily kitchen serving capacity</label>
+                    <input class="text-input" type="number" id="kitchenCapacity" min="1" max="5000" step="1" value="200" />
                     <label class="field-label" for="allergenExclusions">Allergen exclusions <small>comma separated</small></label>
                     <input class="text-input" id="allergenExclusions" value="peanut" placeholder="peanut, sesame" />
                     <label class="field-label" for="ingredientExclusions">Ingredient exclusions <small>comma separated</small></label>
@@ -124,7 +127,7 @@
                   </div>
                 </details>
               </form>
-              <div class="constraint-callout"><span class="callout-icon">✓</span><div><strong>Hard constraints stay hard</strong><small>Budget, attendance, equipment and selected exclusions are checked before a menu is shown.</small></div></div>
+              <div class="constraint-callout"><span class="callout-icon">✓</span><div><strong>Hard constraints stay hard</strong><small>Capacity, budget, attendance, equipment and selected exclusions are checked before a menu is shown.</small></div></div>
             </article>
 
             <article class="panel taste-panel" id="taste-signals">
@@ -151,7 +154,15 @@
               <div id="liveProfileFields" hidden>
                 <label class="field-label" for="venueNames">Restaurant or dining interests <small>one per line, up to three</small></label>
                 <textarea class="text-input textarea-input live-textarea" id="venueNames" rows="3" placeholder="Olive Garden&#10;Din Tai Fung&#10;Taqueria"></textarea>
-                <div class="source-note live-note"><span class="source-label">SERVER-SIDE KEY</span><span>Live mode requires an event-issued Qloo key configured in the Site runtime. The key never enters this browser.</span></div>
+                <div class="source-note live-note"><span class="source-label">SERVER-SIDE KEY</span><span>Live mode requires a configured Qloo service. API keys stay on the server.</span></div>
+              </div>
+              <div class="planning-method">
+                <label class="field-label" for="planningMethod">Planning method</label>
+                <select class="text-input" id="planningMethod" aria-describedby="planningMethodHelp">
+                  <option value="rules">Verified rules planner</option>
+                  <option value="agent" id="agentMethodOption" disabled>AI tool agent</option>
+                </select>
+                <p class="profile-venues" id="planningMethodHelp" role="status">Checking AI availability…</p>
               </div>
               <div class="taste-footer">
                 <span class="privacy-icon">⌑</span>
@@ -165,8 +176,14 @@
               <div><div class="section-kicker">03 / FIVE-DAY PLAN</div><h2>Your service week</h2><p class="section-subtitle" id="planSubtitle">Generate a plan to compare operational fit with taste signals.</p></div>
               <div class="section-actions">
                 <span class="plan-status" id="planStatus"><span class="status-dot"></span>Waiting for a plan</span>
-                <button class="button button-quiet" id="exportButton" disabled>Export shopping list <span>↓</span></button>
+                <button class="button button-quiet" id="exportButton" disabled>Export weekly plan <span>↓</span></button>
               </div>
+            </div>
+            <div class="history-controls" id="historyControls" hidden>
+              <label for="planHistory">Recent plans</label>
+              <select class="text-input" id="planHistory" aria-label="Choose a plan to restore"></select>
+              <button class="button button-quiet" id="restoreHistoryButton">Restore plan</button>
+              <button class="button button-quiet" id="undoShockButton" hidden>Undo supply shock</button>
             </div>
             <div class="plan-empty" id="planEmpty">
               <div class="empty-illustration"><span>◉</span><span>✦</span><span>▤</span></div>
@@ -178,12 +195,33 @@
               <div class="loader-ring"></div><div><strong>Working through the kitchen brief</strong><p id="loadingText">Checking hard constraints…</p></div>
             </div>
             <div class="menu-grid" id="menuGrid" hidden></div>
+            <p class="agent-summary" id="agentSummary" hidden></p>
             <div class="plan-footnote" id="planFootnote" hidden><span>ⓘ</span> Cost estimates use the editable demo price sheet. Ingredient labels and kitchen cross-contact must be checked before service.</div>
+          </section>
+
+          <section class="section-block dashboard-section" id="dashboard" hidden aria-label="Operational dashboard">
+            <div class="section-title-row">
+              <div><div class="section-kicker">04 / OPERATIONS DASHBOARD</div><h2>Plan at a glance</h2><p class="section-subtitle">Live totals from this menu and its calculated purchase list.</p></div>
+            </div>
+            <div class="dashboard-grid">
+              <article class="panel dashboard-card">
+                <div class="panel-heading"><div><div class="section-kicker">DAILY SPEND</div><h2>Cost versus cap</h2></div><span class="chart-unit" id="dailySpendCap">Cap —</span></div>
+                <div class="chart-list" id="dailySpendChart"></div>
+              </article>
+              <article class="panel dashboard-card">
+                <div class="panel-heading"><div><div class="section-kicker">MENU MIX</div><h2>Servings by cuisine</h2></div><span class="chart-unit">planned covers</span></div>
+                <div class="chart-list" id="cuisineMixChart"></div>
+              </article>
+              <article class="panel dashboard-card">
+                <div class="panel-heading"><div><div class="section-kicker">PURCHASE COST</div><h2>Largest items</h2></div><span class="chart-unit">top 5</span></div>
+                <div class="chart-list" id="purchaseCostChart"></div>
+              </article>
+            </div>
           </section>
 
           <section class="section-block compare-section" id="compare">
             <div class="section-title-row compare-header">
-              <div><div class="section-kicker">04 / SIDE-BY-SIDE TEST</div><h2 id="compareTitle">Taste signal advantage</h2><p class="section-subtitle">Same recipes, budget, attendance and operational rules. Only the added dining signal changes.</p></div>
+              <div><div class="section-kicker">05 / SIDE-BY-SIDE TEST</div><h2 id="compareTitle">Taste signal advantage</h2><p class="section-subtitle">Same recipes, budget, attendance and operational rules. Only the added dining signal changes.</p></div>
               <span class="compare-mark">SAME CONSTRAINTS <span>↔</span></span>
             </div>
             <details class="weight-controls">
@@ -207,7 +245,7 @@
           <section class="lower-grid">
             <article class="panel procurement-panel" id="procurement">
               <div class="panel-heading">
-                <div><div class="section-kicker">05 / PROCUREMENT</div><h2>What to bring in</h2></div>
+                <div><div class="section-kicker">06 / PROCUREMENT</div><h2>What to bring in</h2></div>
                 <span class="shopping-icon">⌑</span>
               </div>
               <p class="panel-copy">Five-day quantities minus on-hand inventory.</p>
@@ -216,7 +254,7 @@
             </article>
             <article class="panel activity-panel" id="activity">
               <div class="panel-heading">
-                <div><div class="section-kicker">06 / AGENT TRACE</div><h2>How the plan was made</h2></div>
+                <div><div class="section-kicker">07 / AGENT TRACE</div><h2>How the plan was made</h2></div>
                 <span class="trace-count" id="traceCount">0 steps</span>
               </div>
               <div class="trace-list" id="traceList"><div class="muted-empty">The tool trace appears when a plan runs.</div></div>

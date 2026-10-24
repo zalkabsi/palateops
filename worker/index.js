@@ -1,15 +1,28 @@
 const ASSETS = __ASSETS__;
 const RATE_BUCKETS = new Map();
 const MAX_BODY_BYTES = 4096;
+const MAX_AGENT_BODY_BYTES = 16 * 1024;
 const BACKEND_TIMEOUT_MS = 25_000;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/api/health" && request.method === "GET") {
-      return json({ status: "ok", demoMode: "sample", qlooBackendConfigured: Boolean(env.QLOO_BACKEND_URL && isStrongBackendToken(env.QLOO_BACKEND_TOKEN)) }, 200, request);
+      const configured = Boolean(env.QLOO_BACKEND_URL && isStrongBackendToken(env.QLOO_BACKEND_TOKEN));
+      let agentConfigured = false;
+      const healthUrl = configured && buildBackendUrl(env.QLOO_BACKEND_URL, "/healthz");
+      if (healthUrl) {
+        try {
+          const response = await fetch(healthUrl, {
+            headers: { authorization: "Bearer " + env.QLOO_BACKEND_TOKEN },
+            redirect: "error", signal: AbortSignal.timeout(3000),
+          });
+          if (response.ok) agentConfigured = (await response.json()).agentConfigured === true;
+        } catch {}
+      }
+      return json({ status: "ok", demoMode: "sample", qlooBackendConfigured: configured, agentConfigured }, 200, request);
     }
-    if (url.pathname === "/api/qloo/resolve" || url.pathname === "/api/qloo/signals") {
+    if (url.pathname === "/api/qloo/resolve" || url.pathname === "/api/qloo/signals" || url.pathname === "/api/agent/plan") {
       if (request.method !== "POST") return json({ error: "Use POST for a live Qloo taste request." }, 405, request);
       return handleQloo(request, env, url.pathname);
     }
@@ -32,27 +45,34 @@ export default {
 };
 
 async function handleQloo(request, env, path) {
+  const agentRequest = path === "/api/agent/plan";
+  const maxBytes = agentRequest ? MAX_AGENT_BODY_BYTES : MAX_BODY_BYTES;
   const contentType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (contentType !== "application/json") {
     return json({ error: "The taste profile request must use application/json." }, 415, request);
   }
   const length = Number(request.headers.get("content-length") || 0);
-  if (length > MAX_BODY_BYTES) return json({ error: "The taste profile request is too large." }, 413, request);
+  if (length > maxBytes) return json({ error: "The planning request is too large." }, 413, request);
   let body;
   try {
-    const rawBody = await readBodyWithLimit(request, MAX_BODY_BYTES);
+    const rawBody = await readBodyWithLimit(request, maxBytes);
     if (rawBody === null) return json({ error: "The taste profile request is too large." }, 413, request);
     body = JSON.parse(rawBody);
   } catch { return json({ error: "The taste profile request must be valid JSON." }, 400, request); }
   if (!env.QLOO_BACKEND_URL || !isStrongBackendToken(env.QLOO_BACKEND_TOKEN)) {
-    return json({ error: "Live Qloo mode is not configured. Set the authorized Node backend URL and shared token, or switch to Sample profile." }, 503, request);
+    return json({ error: agentRequest ? "The AI planner is not configured. Choose the rules planner." : "Live Qloo mode is not configured. Set the authorized Node backend URL and shared token, or switch to Sample profile." }, 503, request);
   }
   const backendUrl = buildBackendUrl(env.QLOO_BACKEND_URL, path);
   if (!backendUrl) return json({ error: "The live Qloo backend URL is invalid or must use HTTPS." }, 503, request);
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
   if (!allowRequest(ip)) return json({ error: "Too many live taste requests. Wait a minute and try again." }, 429, request);
   try {
-    if (path.endsWith("/resolve")) {
+    if (agentRequest) {
+      if (!body || !body.scenario || typeof body.scenario !== "object" || Array.isArray(body.scenario) || !["sample", "live"].includes(body.mode)) {
+        return json({ error: "The agent needs a valid kitchen scenario and signal mode." }, 400, request);
+      }
+      body = { scenario: body.scenario, weights: body.weights, mode: body.mode, sampleProfile: body.sampleProfile, entities: body.entities };
+    } else if (path.endsWith("/resolve")) {
       const venues = normalizeVenues(body?.venues);
       if (venues.error) return json({ error: venues.error }, 400, request);
       body = { venues: venues.values };
@@ -69,16 +89,17 @@ async function handleQloo(request, env, path) {
         "x-palateops-client-ip": ip,
       },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(BACKEND_TIMEOUT_MS),
+      redirect: "error",
+      signal: AbortSignal.timeout(agentRequest ? 70_000 : BACKEND_TIMEOUT_MS),
     });
     let payload;
     try { payload = await response.json(); } catch { return json({ error: "The live Qloo backend returned an unreadable response." }, 502, request); }
     return json(payload, response.status, request);
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      return json({ error: "The live Qloo backend took too long to respond. No sample data was substituted." }, 504, request);
+      return json({ error: agentRequest ? "The AI planner took too long to respond. No unverified plan was returned." : "The live Qloo backend took too long to respond. No sample data was substituted." }, 504, request);
     }
-    return json({ error: "The live Qloo backend is unavailable. No sample data was substituted." }, 502, request);
+    return json({ error: agentRequest ? "The AI planner is unavailable. No unverified plan was returned." : "The live Qloo backend is unavailable. No sample data was substituted." }, 502, request);
   }
 }
 

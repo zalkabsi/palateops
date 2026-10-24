@@ -9,12 +9,22 @@ Set these values in the container host's secret manager:
 - `QLOO_API_KEY`: event-issued credential. Never put it in the Site Worker or browser.
 - `QLOO_BACKEND_TOKEN`: shared bearer token used only between this service and the Site Worker.
 - `PORT`: optional listener port; defaults to `8788`.
+- `PALATEOPS_AGENT_ENABLED`: set to `true` to enable the optional model planner.
+- `OPENAI_API_KEY` and `OPENAI_MODEL`: model secret and explicit compatible model ID, required only for the AI method. See [the agent guide](../docs/AGENT.md).
 
 Generate a token locally with `openssl rand -hex 32`; configure the same value as `QLOO_BACKEND_TOKEN` in the container and the Site runtime. The service rejects tokens shorter than 32 characters. Do not commit it.
 
-Build and run the container with both secrets supplied by the host. The service exposes `/healthz`, `/api/qloo/resolve`, and `/api/qloo/signals`. The resolution route returns exact matches or candidate suggestions without querying Insights. The signals route runs `qloo api insights` only after the browser has shown the resolved names and the user confirms them.
+Build from the repository root so shared planner modules are included:
 
-The service does not enable browser CORS. The Site Worker authenticates with the bearer token and proxies the two routes. The backend limits requests and command duration/output, passes the API key only to the `qloo` child process, and sanitizes command errors.
+```sh
+docker build -f qloo-backend/Dockerfile -t palateops-backend .
+```
+
+For a managed environment with a session proxy CA, add `--secret id=proxy_ca,src="$CODEX_PROXY_CERT"` to the build command. The optional secret mount extends npm trust only during installation and is not copied into the image. Preserve the environment's proxy settings and TLS verification.
+
+Supply secrets through the host. The service exposes `/healthz`, `/api/qloo/resolve`, `/api/qloo/signals`, and `/api/agent/plan`. The resolution route returns exact matches or candidate suggestions without querying Insights. The signals route runs `qloo api insights` only after the browser has shown the resolved names and the user confirms them. The agent route calls model-selected tools over server-owned planning state; Sample mode can use the AI method without a Qloo key.
+
+The service does not enable browser CORS. The Site Worker authenticates with the bearer token and proxies requests. The backend limits request size, model runs and command duration/output, passes only the Qloo key to the `qloo` child process, preserves proxy and CA settings, and sanitizes provider errors. The model key is never inherited by the Qloo process.
 
 ## Local development
 

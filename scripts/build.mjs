@@ -11,6 +11,7 @@ const assetPaths = [
   ["src/planner.js", "/src/planner.js", "text/javascript; charset=utf-8"],
   ["src/recipes.js", "/src/recipes.js", "text/javascript; charset=utf-8"],
   ["src/qloo.js", "/src/qloo.js", "text/javascript; charset=utf-8"],
+  ["src/agent.js", "/src/agent.js", "text/javascript; charset=utf-8"],
 ];
 
 await rm(dist, { recursive: true, force: true });

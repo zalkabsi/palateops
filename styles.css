@@ -152,9 +152,32 @@ input[type="checkbox"] { accent-color: #397154; }
 .section-title-row h2 { margin-top: 5px; font-size: 19px; }
 .section-subtitle { margin: 5px 0 0; color: #89948c; font-size: 10px; line-height: 1.5; }
 .section-actions { display: flex; align-items: center; gap: 13px; }
+.dashboard-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.dashboard-card { min-width: 0; padding: 15px 16px; }
+.dashboard-card h2 { font-size: 14px; }
+.chart-unit { padding: 4px 6px; border-radius: 5px; color: #87948a; background: #f4f6f1; font-size: 8px; white-space: nowrap; }
+.chart-list { display: grid; gap: 11px; margin-top: 15px; }
+.progress-row { min-width: 0; }
+.progress-row-head { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: #66756c; font-size: 9px; }
+.progress-row-head span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.progress-row-head strong { color: #425b49; font-size: 9px; font-weight: 600; white-space: nowrap; }
+.chart-progress { display: block; width: 100%; height: 7px; border: 0; border-radius: 6px; background: transparent; appearance: none; }
+.chart-progress::-webkit-progress-bar { border-radius: 6px; background: #edf0e9; }
+.chart-progress::-webkit-progress-value { border-radius: 6px; background: #76a37b; }
+.chart-progress::-moz-progress-bar { border-radius: 6px; background: #76a37b; }
+.dashboard-card:nth-child(2) .chart-progress::-webkit-progress-value,
+.dashboard-card:nth-child(2) .chart-progress::-moz-progress-bar { background: #91a36a; }
+.dashboard-card:nth-child(3) .chart-progress::-webkit-progress-value,
+.dashboard-card:nth-child(3) .chart-progress::-moz-progress-bar { background: #c59c59; }
+.chart-empty { margin: 0; color: #9ba59c; font-size: 9px; line-height: 1.5; }
 .plan-status { color: #8d9990; }
 .plan-status.ready .status-dot { background: #4d9a68; }
 .plan-status.error .status-dot { background: #cf765e; }
+.history-controls { display: flex; align-items: center; gap: 8px; margin: -2px 0 12px; color: #839087; font-size: 9px; }
+.history-controls[hidden] { display: none; }
+.history-controls .text-input { width: min(300px, 38vw); min-height: 30px; padding: 5px 8px; font-size: 9px; }
+.history-controls .button { min-height: 30px; padding: 0 9px; font-size: 8px; }
+.history-controls button[hidden] { display: none; }
 .plan-empty { min-height: 185px; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; border: 1px dashed #dfe4da; border-radius: 11px; background: rgba(255,255,255,.46); text-align: center; }
 .empty-illustration { position: relative; width: 53px; height: 38px; margin-bottom: 10px; }
 .empty-illustration span { position: absolute; display: grid; width: 27px; height: 27px; place-items: center; border: 1px solid #dfe7d8; border-radius: 9px; color: #558168; background: white; box-shadow: 0 4px 9px rgba(43,77,51,.07); }
@@ -292,6 +315,7 @@ input[type="checkbox"] { accent-color: #397154; }
   .nav-count, .sidebar-note, .sidebar-user > div, .more { display: none; }
   .sidebar-user { justify-content: center; }
   .workbench-grid, .lower-grid { grid-template-columns: 1fr; }
+  .dashboard-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 620px) {
   .app-shell { display: block; }
@@ -320,6 +344,8 @@ input[type="checkbox"] { accent-color: #397154; }
   .section-title-row { display: block; }
   .section-actions { justify-content: space-between; margin-top: 10px; }
   .section-actions .button { min-height: 31px; }
+  .history-controls { flex-wrap: wrap; margin-top: 0; }
+  .history-controls .text-input { flex: 1 1 150px; width: auto; }
   .menu-grid { grid-template-columns: 1fr; gap: 7px; }
   .day-card { padding: 11px 13px; }
   .day-card-head strong { font-size: 11px; }
@@ -332,3 +358,5 @@ input[type="checkbox"] { accent-color: #397154; }
   .compare-mark { display: inline-block; margin-top: 10px; }
   .page-footer { align-items: flex-start; flex-direction: column; line-height: 1.5; }
 }
+.planning-method { margin-top: 18px; }
+.agent-summary { padding: 14px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--cream); font-size: 13px; line-height: 1.6; }

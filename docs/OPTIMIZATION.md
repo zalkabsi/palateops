@@ -4,6 +4,7 @@
 
 - The planning period is five weekdays.
 - The demo has 150 expected covers by default.
+- The demo capacity is 200 covers per day; attendance above the stated capacity is rejected before optimization.
 - The demo allocates 35% of covers to the vegetarian option and 65% to the flexible option. This is an editable assumption, not measured demand.
 - All catalog recipe costs are illustrative US-dollar ingredient estimates. Supplier prices, taxes, labor, waste, nutrition and equipment throughput are not modeled.
 - Entered inventory reduces the shopping list. Recipe cost remains conservative and counts the full ingredient value against the daily cap.
@@ -11,7 +12,7 @@
 
 ## Feasibility rules
 
-The engine removes recipes that conflict with an excluded allergen, excluded ingredient or unavailable equipment. It forms daily pairs containing a vegetarian dish and allocates the planned servings. A candidate is discarded when its ingredient cost exceeds the daily budget. The weekly plan must pass a final verifier for attendance, budget, vegetarian coverage, exclusions and duplicate recipes.
+The engine removes recipes that conflict with an excluded allergen, excluded ingredient or unavailable equipment. It forms daily menus containing a vegetarian dish and allocates the planned servings. A candidate is discarded when its ingredient cost exceeds the daily budget. The planner requires five distinct daily menu combinations. The weekly plan must pass a final verifier for capacity, attendance, budget, vegetarian coverage, exclusions and duplicate recipes.
 
 No hard rule is relaxed. If no candidate remains, the planner returns an explicit infeasible result.
 

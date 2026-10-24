@@ -41,5 +41,5 @@ Configure the model service and event-issued Qloo key, record a real agent run a
 
 ## Demo and repository
 
-- Demo: https://palateops-qloo.zeynkbsi.chatgpt.site (Sites reports public production version 4. This draft also describes newer local changes that have not been published. Live Qloo and the model service are not configured. External HTTP reachability was not verified from this runner.)
-- Source: https://github.com/zalkabsi/palateops-qloo (the repository remains private. The tested source updates are prepared as a separate submission branch and must be merged and made public before final submission.)
+- Demo: https://palateops-qloo.zeynkbsi.chatgpt.site (Sites reports public production version 4. This draft also describes newer source changes that have not been published to the Site. Live Qloo and the model service are not configured. External HTTP reachability was not verified from this runner.)
+- Source: https://github.com/zalkabsi/palateops-qloo (the tested implementation is merged on main through [PR #1](https://github.com/zalkabsi/palateops-qloo/pull/1). The repository remains private and must be made public before final submission.)

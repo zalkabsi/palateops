@@ -146,6 +146,7 @@ export async function runPlan({ input, data, cache, model = null }) {
   let constraints = { ...initialConstraints };
   const attempts = [];
 
+  let lastLengths = [];
   const rankEveryone = async (active) => {
     const lists = [];
     for (const person of resolvedPeople) {
@@ -171,6 +172,7 @@ export async function runPlan({ input, data, cache, model = null }) {
       );
       lists.push({ label: person.label, entities: places });
     }
+    lastLengths = lists.map((list) => list.entities.length);
     return joinCandidates(lists);
   };
 
@@ -182,7 +184,13 @@ export async function runPlan({ input, data, cache, model = null }) {
   // makes that choice; otherwise the fixed ladder does. Neither can loop forever.
   const surrendered = new Set();
   while (summary.everyoneCount === 0) {
-    const remaining = RELAXATIONS.filter((entry) => !surrendered.has(entry.id) && entry.apply(constraints) !== null);
+    // Asking for deeper lists only makes sense when Qloo truncated someone.
+    const truncated = lastLengths.some((length) => length >= constraints.take);
+    const remaining = RELAXATIONS.filter((entry) => {
+      if (surrendered.has(entry.id)) return false;
+      if (entry.id === "depth" && !truncated) return false;
+      return entry.apply(constraints) !== null;
+    });
     if (remaining.length === 0) break;
 
     let chosen = null;

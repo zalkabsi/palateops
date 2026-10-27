@@ -11,10 +11,10 @@ Anything marked ⚠️ must be replaced with a real value before submitting.
 
 | # | Requirement | Where it is satisfied |
 | --- | --- | --- |
-| 1 | Link to a functional demo app | ⚠️ `https://<service>.onrender.com/?preset=the-table&run=1` |
+| 1 | Link to a functional demo app | https://palateops.onrender.com/?preset=the-table&run=1 — deployed and verified, currently labeled sample mode |
 | 2 | URL to a public code repository | https://github.com/zalkabsi/palateops — public |
 | 3 | Text description of what the project does | [Description](#description) below |
-| 4 | Externally hosted / fully published | Render Docker service, `render.yaml` in repo. Not local-only |
+| 4 | Externally hosted / fully published | https://palateops.onrender.com — Render Docker service, `render.yaml` in repo |
 | 5 | Open-source license visible in the repo About section | `LICENSE` (MIT) at the repo root — GitHub surfaces it in About |
 
 No demo video is required by the rules. The app itself is the deliverable, so the demo URL must be the strongest
@@ -119,7 +119,8 @@ must say so — it is a different claim.
 
 - [ ] API key requested via the form — **provisioning takes a few business days, request it first**
 - [ ] `npm run check:qloo` passes; output pasted above
-- [ ] Live URL deployed; `/api/health` reports `mode: "live"` and the hackathon base URL
+- [x] Live URL deployed — https://palateops.onrender.com (health, assets, full plan verified; base URL already the hackathon host)
+- [ ] `/api/health` reports `mode: "live"` once `QLOO_API_KEY` is set
 - [ ] Demo URL uses a deep link so a judge lands on a completed run
 - [ ] Repository public, MIT license visible in the About section
 - [ ] Description pasted into Devpost

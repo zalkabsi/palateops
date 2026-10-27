@@ -191,11 +191,30 @@ describe("model-driven negotiation", () => {
     };
   }
 
+  /** Every person gets a full-length list, so both relaxations are on the table. */
+  function truncatingData() {
+    return {
+      mode: "fixture",
+      async search({ query }) { return [{ id: `id-${query}`, name: query, tags: [] }]; },
+      async recommend({ signals, maxPriceLevel }) {
+        if (maxPriceLevel) {
+          const owner = signals[0].name;
+          return Array.from({ length: 30 }, (_, index) => ({
+            id: `solo-${owner}-${index}`, name: `Solo ${owner} ${index}`, affinity: 0.5, tags: [], address: "",
+          }));
+        }
+        return Array.from({ length: 30 }, (_, index) => ({
+          id: `pool-${index}`, name: `Pool ${index}`, affinity: 0.8, tags: [], address: "",
+        }));
+      },
+    };
+  }
+
   it("lets the model choose what to give up, and records who chose", async () => {
     const input = parsePlanInput({ ...INPUT, maxPriceLevel: 2 });
     const result = await runPlan({
       input,
-      data: stubData({ disjointWhenPriced: true }),
+      data: truncatingData(),
       cache: createCache(),
       model: modelStub(["depth", "price"]),
     });
@@ -236,5 +255,46 @@ describe("model-driven negotiation", () => {
     const spy = { ...model, fetchImpl: async (...args) => { called = true; return model.fetchImpl(...args); } };
     await runPlan({ input: parsePlanInput(INPUT), data: stubData(), cache: createCache(), model: spy });
     assert.equal(called, true, "narration still uses the model");
+  });
+});
+
+describe("cost discipline", () => {
+  it("does not ask for deeper lists when Qloo already returned fewer than requested", async () => {
+    const input = parsePlanInput({ ...INPUT, maxPriceLevel: 2 });
+    const result = await runPlan({
+      input,
+      data: stubData({ disjointWhenPriced: true }),
+      cache: createCache(),
+    });
+    // Only the price relaxation should fire; the stub returns 1 place per
+    // person, so the lists were never truncated and depth would be wasted calls.
+    assert.deepEqual(result.negotiation.decisions.map((decision) => decision.id), ["price"]);
+    assert.equal(result.negotiation.attempts.length, 2);
+  });
+
+  it("still deepens when a list was truncated at the requested size", async () => {
+    const many = Array.from({ length: 30 }, (_, index) => ({
+      id: `p-${index}`,
+      name: `Place ${index}`,
+      affinity: 0.5,
+      tags: [],
+      address: "",
+    }));
+    const data = {
+      mode: "fixture",
+      async search({ query }) { return [{ id: `id-${query}`, name: query, tags: [] }]; },
+      async recommend({ signals, take }) {
+        // Every person gets a different slice, always exactly `take` long.
+        const offset = signals[0].name.length;
+        return many.slice(offset % 5, (offset % 5) + Math.min(take, 30)).map((place, index) => ({
+          ...place,
+          id: `${place.id}-${signals[0].name}`,
+          affinity: 0.4 + index / 100,
+        }));
+      },
+    };
+    const input = parsePlanInput({ ...INPUT, maxPriceLevel: 2 });
+    const result = await runPlan({ input, data, cache: createCache() });
+    assert.ok(result.negotiation.decisions.some((decision) => decision.id === "depth"));
   });
 });

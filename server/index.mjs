@@ -63,6 +63,9 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
   async function health(response) {
     return sendJson(response, 200, {
       status: "ok",
+      // Render injects the commit at build time; without it there is no way to
+      // tell a stale deploy from a stale browser tab.
+      build: String(env.RENDER_GIT_COMMIT ?? "").slice(0, 7) || "dev",
       mode: data.mode,
       qlooConfigured: data.live,
       qlooBaseUrl: data.baseUrl,
@@ -202,7 +205,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const server = createServer(app.handle);
   server.listen(PORT, HOST, () => {
     const target = `http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`;
-    console.log(`[palateops] listening on ${target}`);
+    console.log(`[palateops] build ${String(process.env.RENDER_GIT_COMMIT ?? "").slice(0, 7) || "dev"} listening on ${target}`);
     console.log(`[palateops] mode: ${app.data.mode}${app.data.live ? " -> " + app.data.baseUrl : " (no QLOO_API_KEY - fixture data)"}`);
     console.log(`[palateops] verdict writer: ${app.model.configured ? app.model.provider : "deterministic"}`);
   });

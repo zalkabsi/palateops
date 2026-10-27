@@ -34,8 +34,9 @@ The loop is plan → act → observe → revise:
 1. **Resolve.** Every taste signal becomes a Qloo entity. Unmatched names are dropped and shown as a failed step.
 2. **Rank once per person.** Never once for the group — averaging people together is the failure this exists to fix.
 3. **Test the group score.** A place must clear everybody. Any single indifferent person drags the score to zero.
-4. **Revise if the answer is nothing.** No shared place → the agent drops the price ceiling, re-asks Qloo, and if
-   that fails, asks for deeper rankings. It reports the decision and the reason.
+4. **Revise if the answer is nothing.** No shared place → the agent surrenders one constraint, re-asks Qloo, and
+   repeats. With a model configured, **the model chooses which constraint to give up**; without one, a fixed ladder
+   does it. Either way the decision, its author and its reason are recorded and shown.
 5. **Show the receipts.** Every call, every score, every concession, including cached calls.
 
 The negotiation is the part that makes it an agent rather than a lookup: it has a goal, it can fail, and it decides
@@ -76,7 +77,7 @@ With a key:
 
 ```bash
 QLOO_API_KEY=... npm start
-QLOO_API_KEY=... npm run check:qloo    # proves key + host + response shape in one command
+QLOO_API_KEY=... npm run check:qloo    # runs the whole agent loop live and prints a go/no-go
 ```
 
 ### Getting a key
@@ -93,7 +94,8 @@ The Qloo kit states serverless function runtimes are **not** supported: the harn
 A `Dockerfile` and a `render.yaml` blueprint are included.
 
 1. Push this repository.
-2. Render → **New → Blueprint** → pick the repo. It reads `render.yaml`.
+2. Render → **New → Blueprint** → pick the repo. It reads `render.yaml`. The image builds with
+   `npm ci --omit=dev`; that exact command is verified to work from a clean checkout.
 3. Set `QLOO_API_KEY` in the dashboard. Never in the repo.
 4. `/api/health` reports `mode: "live"` plus the base URL in use.
 
@@ -132,7 +134,7 @@ locally.
 | A successful live Qloo response | **Not yet run** — needs the event credential |
 | Whether `affinity` is populated for place insights | **Unknown until `npm run check:qloo` runs** |
 | Whether tags separate shared from individual taste on real data | **Unknown until live data exists** |
-| Model-written verdict | Implemented and fixture-tested; falls back to the deterministic writer |
+| Model-chosen concessions and verdict | Implemented and tested against a stubbed provider; falls back to the fixed ladder and the deterministic writer |
 | Venue quality or whether venues still exist | Not evaluated |
 
 Until the live check passes, every number in the UI is sample data.

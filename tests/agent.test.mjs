@@ -167,3 +167,74 @@ describe("runPlan", () => {
     assert.ok(result.narration.headline.length > 0);
   });
 });
+
+describe("model-driven negotiation", () => {
+  const jsonResponse = (payload) => ({ ok: true, json: async () => payload });
+
+  function modelStub(choices) {
+    let index = 0;
+    return {
+      configured: true,
+      baseUrl: "http://stub.invalid",
+      apiKey: "stub",
+      model: "stub",
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(init.body);
+        const system = body.messages?.[0]?.content ?? "";
+        if (system.includes("Choose exactly one constraint")) {
+          const relax = choices[Math.min(index, choices.length - 1)];
+          index += 1;
+          return jsonResponse({ choices: [{ message: { content: JSON.stringify({ relax }) } }] });
+        }
+        return jsonResponse({ choices: [{ message: { content: JSON.stringify({ headline: "A verdict", detail: "Because of reasons.", advice: "Book somewhere." }) } }] });
+      },
+    };
+  }
+
+  it("lets the model choose what to give up, and records who chose", async () => {
+    const input = parsePlanInput({ ...INPUT, maxPriceLevel: 2 });
+    const result = await runPlan({
+      input,
+      data: stubData({ disjointWhenPriced: true }),
+      cache: createCache(),
+      model: modelStub(["depth", "price"]),
+    });
+
+    assert.deepEqual(result.negotiation.decisions.map((decision) => decision.id), ["depth", "price"]);
+    assert.ok(result.negotiation.decisions.every((decision) => decision.by === "model"));
+    assert.equal(result.narrationSource, "model");
+  });
+
+  it("falls back to the default order when the model names something invalid", async () => {
+    const input = parsePlanInput({ ...INPUT, maxPriceLevel: 2 });
+    const result = await runPlan({
+      input,
+      data: stubData({ disjointWhenPriced: true }),
+      cache: createCache(),
+      model: modelStub(["something_else"]),
+    });
+
+    assert.equal(result.negotiation.decisions[0].id, "price");
+    assert.equal(result.negotiation.decisions[0].by, "rules");
+  });
+
+  it("never relaxes the same constraint twice", async () => {
+    const input = parsePlanInput({ ...INPUT, maxPriceLevel: 2 });
+    const result = await runPlan({
+      input,
+      data: stubData({ disjointWhenPriced: true }),
+      cache: createCache(),
+      model: modelStub(["price"]),
+    });
+    const ids = result.negotiation.decisions.map((decision) => decision.id);
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
+  it("does not call the model at all when nothing needs relaxing", async () => {
+    let called = false;
+    const model = modelStub(["price"]);
+    const spy = { ...model, fetchImpl: async (...args) => { called = true; return model.fetchImpl(...args); } };
+    await runPlan({ input: parsePlanInput(INPUT), data: stubData(), cache: createCache(), model: spy });
+    assert.equal(called, true, "narration still uses the model");
+  });
+});

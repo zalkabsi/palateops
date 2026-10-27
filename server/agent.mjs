@@ -17,7 +17,7 @@
 import { compareTaste, joinCandidates, summarize, tagProfile } from "./compromise.mjs";
 import { cacheKey } from "./cache.mjs";
 import { narrate } from "./narrate.mjs";
-import { requestNarration } from "./model.mjs";
+import { requestNarration, requestRelaxation } from "./model.mjs";
 
 export const MAX_PEOPLE = 5;
 export const MIN_PEOPLE = 2;
@@ -178,13 +178,55 @@ export async function runPlan({ input, data, cache, model = null }) {
   let summary = summarize(joined.venues, resolvedPeople.length);
   attempts.push({ constraints: { ...constraints }, everyoneCount: summary.everyoneCount, total: summary.total });
 
-  for (const relaxation of RELAXATIONS) {
-    if (summary.everyoneCount > 0) break;
+  // Observe, then decide what - if anything - to surrender. A configured model
+  // makes that choice; otherwise the fixed ladder does. Neither can loop forever.
+  const surrendered = new Set();
+  while (summary.everyoneCount === 0) {
+    const remaining = RELAXATIONS.filter((entry) => !surrendered.has(entry.id) && entry.apply(constraints) !== null);
+    if (remaining.length === 0) break;
+
+    let chosen = null;
+    if (model?.configured) {
+      const startedAt = Date.now();
+      chosen = await requestRelaxation({
+        model,
+        options: remaining.map((entry) => ({ id: entry.id, label: entry.label, effect: entry.reason })),
+        evidence: {
+          city: input.city,
+          constraints,
+          people: resolvedPeople.map((person) => person.label),
+          places_seen: summary.total,
+          shared_so_far: summary.everyoneCount,
+          best_available: joined.venues.slice(0, 3).map((venue) => ({ name: venue.name, scores: venue.scores })),
+        },
+      });
+      trace.push({
+        tool: "decide_relaxation",
+        label: chosen ? `Model chose to relax: ${chosen}` : "Model deferred to the default order",
+        ok: true,
+        ms: Date.now() - startedAt,
+      });
+    }
+
+    const relaxation = remaining.find((entry) => entry.id === chosen) ?? remaining[0];
     const next = relaxation.apply(constraints);
-    if (!next) continue;
+    if (!next) break;
+    surrendered.add(relaxation.id);
     constraints = next;
-    decisions.push({ kind: "relax", id: relaxation.id, label: relaxation.label, reason: relaxation.reason });
-    trace.push({ tool: "revise_plan", label: `Revise: ${relaxation.label.toLowerCase()}`, ok: true, ms: 0, detail: "agent decision" });
+    decisions.push({
+      kind: "relax",
+      id: relaxation.id,
+      label: relaxation.label,
+      reason: relaxation.reason,
+      by: chosen === relaxation.id ? "model" : "rules",
+    });
+    trace.push({
+      tool: "revise_plan",
+      label: `Revise: ${relaxation.label.toLowerCase()}`,
+      ok: true,
+      ms: 0,
+      detail: chosen === relaxation.id ? "chosen by the model" : "default order",
+    });
     joined = await rankEveryone(constraints);
     summary = summarize(joined.venues, resolvedPeople.length);
     attempts.push({ constraints: { ...constraints }, everyoneCount: summary.everyoneCount, total: summary.total });

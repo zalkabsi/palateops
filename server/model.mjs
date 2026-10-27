@@ -36,8 +36,9 @@ Rules:
 - "headline": max 8 words. "detail": max 45 words. "advice": max 35 words.
 - Return JSON only, with keys headline, detail, advice.`;
 
-export async function requestNarration({ model, evidence, fetchImpl = fetch }) {
+export async function requestNarration({ model, evidence, fetchImpl }) {
   if (!model?.configured) return null;
+  const call = fetchImpl ?? model.fetchImpl ?? fetch;
   const payload = {
     model: model.model,
     temperature: 0.4,
@@ -49,7 +50,7 @@ export async function requestNarration({ model, evidence, fetchImpl = fetch }) {
   };
 
   try {
-    const response = await fetchImpl(`${model.baseUrl}/chat/completions`, {
+    const response = await call(`${model.baseUrl}/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${model.apiKey}` },
       body: JSON.stringify(payload),
@@ -99,4 +100,54 @@ function validate(value) {
 
 function text(value, max) {
   return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "";
+}
+
+/**
+ * Ask the model which constraint to give up.
+ *
+ * This is the difference between a model that narrates an agent and a model
+ * that is the agent: the choice of concession is a decision with a cost, and it
+ * belongs to whatever is doing the planning. The fixed ladder in agent.mjs
+ * remains the fallback, so behaviour never depends on the model being present.
+ *
+ * Returns a relaxation id from `options`, or null. Never throws.
+ */
+export async function requestRelaxation({ model, evidence, options, fetchImpl }) {
+  if (!model?.configured || !Array.isArray(options) || options.length === 0) return null;
+  const allowed = options.map((option) => option.id);
+
+  const payload = {
+    model: model.model,
+    temperature: 0.2,
+    response_format: { type: "json_object" },
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are planning a group dinner. No restaurant satisfies everyone under the current constraints. " +
+          "Choose exactly one constraint to relax from the allowed list. Prefer the change that is least likely " +
+          "to spoil someone's evening. Return JSON only: {\"relax\": \"<id>\"}.",
+      },
+      { role: "user", content: JSON.stringify({ allowed, evidence }) },
+    ],
+  };
+
+  const call = fetchImpl ?? model.fetchImpl ?? fetch;
+  try {
+    const response = await call(`${model.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${model.apiKey}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const content = body?.choices?.[0]?.message?.content;
+    if (typeof content !== "string") return null;
+    const parsed = JSON.parse(content);
+    const id = typeof parsed?.relax === "string" ? parsed.relax.trim() : "";
+    return allowed.includes(id) ? id : null;
+  } catch {
+    return null;
+  }
 }

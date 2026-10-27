@@ -9,3 +9,6 @@ playwright-report/
 test-results/
 coverage/
 .DS_Store
+
+# local npm cache (the machine-wide cache has permission issues)
+.npm-cache/

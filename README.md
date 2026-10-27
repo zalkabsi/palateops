@@ -1,113 +1,172 @@
-# PalateOps
+# Duet
 
-**Food planning powered by cultural intelligence.**
+**Two people. One honest answer.**
 
-**Try the public demo:** [palateops-qloo.zeynkbsi.chatgpt.site](https://palateops-qloo.zeynkbsi.chatgpt.site). It opens in Sample mode with labeled synthetic taste cues; Live Qloo mode needs an authorized event key.
+Duet takes what two people genuinely love — an artist, a film, a brand, a book — asks Qloo to rank the *same real
+places* twice, and then shows exactly where their taste actually meets. Not a blended average. Two independent
+rankings, one joint decision, and the evidence for both.
 
-PalateOps helps cafeteria teams turn attendance, budget, dietary rules and voluntary dining interests into a five-day operational menu. It compares an operational baseline with a taste-signal plan, checks hard constraints, totals estimated ingredient costs and prepares a shopping list.
+> **Status:** the product, the scoring engine and the full request→result path are built and tested. The live Qloo
+> leg is wired and verified up to the credential — no event key has been available yet, so every screenshot and
+> demo currently shows **labeled sample data**. See [What is not yet proven](#what-is-not-yet-proven).
 
-> The default public demo uses synthetic taste cues. They are labeled and are not Qloo responses. Live Qloo requests require the event-issued credential and a separately hosted Node.js 22.19+ backend running the Qloo Harness. No live validation has been completed yet.
+---
 
-This source revision includes improvements awaiting publication to the public v4 Site. The optional model agent is implemented and fixture-tested; it has not made a live provider call. See [the implementation log](docs/IMPLEMENTATION_LOG.md) for release status.
+## The problem
 
-## What you can try
+Every recommender answers "what do *you* want". Nobody has built the thing people actually do every week: two
+people who want different things, trying to agree. Group recommendations average the group, which is exactly the
+wrong operation — an average lets a place one person barely tolerates beat a place you both like.
 
-- Generate a five-day, two-option cafeteria menu for Campus Commons.
-- Produce five distinct daily menus or return infeasible when the hard rules cannot be met.
-- Change daily covers, kitchen capacity, budget, vegetarian share, exclusions, equipment and stock on hand.
-- Compare the same scenario with and without a taste signal.
-- Review calculated daily spend, cuisine serving mix and highest purchase costs in the operations dashboard.
-- See portions, recipe cost estimates, constraints and the tool trace.
-- Apply a 25% attendance increase and 20% chicken-price increase, then replan.
-- Restore one of the last six plans from the current browser session, or undo the supply shock.
-- Export a CSV planning pack with the weekly menu, cost summary and consolidated shopping list.
-- Switch to Live Qloo mode to use one to three dining names after an authorized key is configured.
-- Choose the optional AI tool agent when its backend is configured; both plans must pass independent checks before display.
+Duet is built on one rule: **a place has to win twice.**
 
-## Product screenshots
+## Why Qloo is the engine, not a garnish
 
-![PalateOps weekly planner showing the sample menu, comparison, shopping list and activity trace](docs/screenshots/palateops-demo.png)
+Remove Qloo and this product cannot exist:
 
-The screenshot shows labeled synthetic sample data, not a live Qloo response.
+| What Duet needs | Where it comes from |
+| --- | --- |
+| Resolve "Fela Kuti" or "Aesop" into an entity with a real ID | `qloo api search` |
+| Rank restaurants in a city against one person's taste | `qloo api insights` (`--type restaurant`, `--filter-location`) |
+| A per-place affinity number | the `affinity` field on each returned entity |
+| The tags that explain *why* a place fits | nested `tags` on each returned entity |
 
-## How the taste signal works
+The cross-domain part is the point. A brand preference and a record collection are not restaurant reviews, but
+Qloo's graph connects them to places. Nothing else in the stack can do that, so the app is an honest use of the
+API rather than a wrapper with a taste label on it.
 
-Sample mode uses deterministic, synthetic profiles and makes no Qloo API call. Live mode sends up to three voluntary restaurant names to the same-origin Worker. The Worker forwards them to a separate Node.js 22.19+ service running the official Qloo Harness. The browser displays exact place matches for confirmation before the service requests restaurant recommendations and their nested tags. The planner maps only returned tag labels it can match to recipe cuisines. It does not fabricate Qloo scores or predict diner satisfaction. If no tags map to the catalog, the plan remains operational and the app reports that result.
+## How the decision is made
 
-See [the Qloo validation log](docs/QLOO_VALIDATION.md) for official references, the adapter contract and the live-test status.
+1. **Resolve.** Each taste signal becomes a Qloo entity. Unmatched names are dropped and visible in the run log.
+2. **Rank twice.** `qloo api insights` runs once per person, same city, same `take`. Two independent lists.
+3. **Score.** Each place gets a score in `[0,1]` per person: Qloo's `affinity` when present, otherwise its rank
+   position. The pair is combined with a **harmonic mean**, which punishes one-sided matches:
 
-## Planning model
+   ```
+   joint = 2ab / (a + b)
+   ```
 
-The catalog contains 32 original demo recipes with illustrative ingredient quantities, estimated US-dollar prices, dietary tags and equipment needs. The planner checks stated kitchen capacity, daily budget and attendance, requires distinct daily menus, and returns an explicit infeasible result when it cannot satisfy the rules. It uses a deterministic greedy scoring heuristic; it is not an integer-programming proof of optimality.
+   `0.70 / 0.70` (joint 0.70) beats `0.95 / 0.20` (joint 0.33). That inversion is the product.
+4. **Read the vocabulary.** Tags on each person's top-ranked places become a taste vocabulary. Shared tags are
+   those both people rank strongly; divergent tags are shown side by side.
+5. **Present three answers.** Places both rank highly, places in the tolerable middle, and places that are a
+   straight trade. The app never claims agreement that the numbers do not support.
 
-Recipe prices are demonstrations, not supplier quotes. Nutrition figures are omitted because they have not been verified. Allergen metadata is a screening aid and does not guarantee safe preparation or prevent cross-contact.
+A worked example of the scoring is in [docs/SCORING.md](docs/SCORING.md).
 
-## Architecture
+## What the demo shows
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the data flow and [docs/OPTIMIZATION.md](docs/OPTIMIZATION.md) for assumptions and scoring.
+- Two taste profiles built from real public entities, or four one-click starter duos.
+- A verdict, not a list: *"You agree more than you think"* / *"There is a real middle"* / *"You are opposites here"*.
+- Per-place dual bars, so you can see who is being asked to concede.
+- Shared and divergent taste vocabulary derived from Qloo's own tags.
+- A run log and a **Qloo calls** table: every request, how many signals, whether it was served from cache.
+- "Copy the verdict" for the group chat.
 
-The [AI agent guide](docs/AGENT.md) explains its model-directed tool loop, completion checks, configuration and live-validation status.
+Deep link for a repeatable demo: `/?preset=crate-digger&run=1`
 
-![PalateOps request, planning and procurement flow](docs/architecture.svg)
+## Run it locally
 
-## Technology
+Requires **Node.js 22.19+** (a Qloo Harness requirement, not a preference).
 
-- Vanilla JavaScript, HTML and CSS
-- Cloudflare Worker-compatible Site runtime
-- Node.js built-in test runner
-- No browser-side Qloo key and no required user account
+```bash
+npm install
+npm test          # 53 tests, no network
+npm start         # http://localhost:8080
+```
 
-## Run locally
+Without a credential the server starts in **sample mode** and says so in the UI banner and in `/api/health`.
 
-Requires Node.js 20 or later.
+To run against real Qloo:
 
-1. Run npm install.
-2. Run npm test to build the Worker artifact and run unit, adapter and Worker route tests.
-3. Install a Chromium browser for Playwright if one is not already available, then run npm run test:e2e for browser smoke coverage.
-4. Run npm run preview and open the printed local URL for the sample interface.
+```bash
+QLOO_API_KEY=... npm start
+npm run check:qloo      # proves the credential, the harness and the response shape in one command
+```
 
-The local static preview serves Sample mode only. Live Qloo runs through the deployed Site Worker after its backend URL and shared token are configured. Local live testing requires a Worker-compatible runtime configured to proxy to the Node backend.
-
-## Environment
-
-| Name | Required | Purpose |
-| --- | --- | --- |
-| QLOO_API_KEY | No for Sample mode; required for live mode | Event-issued credential stored only in the Qloo backend container's secret manager |
-| QLOO_BACKEND_TOKEN | No for Sample mode; required for live mode | Random shared bearer token stored in the container and Site runtime secret managers |
-| QLOO_BACKEND_URL | No for Sample mode; required for live mode | HTTPS origin of the separately hosted Node backend, stored in the Site runtime |
-| PALATEOPS_AGENT_ENABLED | Only for the AI method | Set to `true` in the Node backend to enable model requests |
-| OPENAI_API_KEY | Only for the AI method | Model credential stored only in the Node backend secret manager |
-| OPENAI_MODEL | Only for the AI method | Explicit Responses-compatible model ID, configured in the Node backend |
-
-The integration uses the hackathon kit's `qloo api search` and `qloo api insights` Harness commands. The Node backend owns the Qloo key; the Site Worker only forwards bounded requests using the shared backend token. See [the Qloo validation log](docs/QLOO_VALIDATION.md) for the dry-run contract and outstanding live checks.
+`check:qloo` reports whether Qloo actually returned `affinity` and `tags` for our request shape. If it did not,
+the app falls back to rank position and the submission notes must say so.
 
 ## Deploy
 
-The Site source manifest is .openai/hosting.json. Build output is written to dist/server/index.js and dist/.openai/hosting.json for the Worker hosting workflow. Build the Node.js 22.19+ backend from the repository root with `docker build -f qloo-backend/Dockerfile -t palateops-backend .`; it includes the shared planning modules. Set `QLOO_API_KEY` and `QLOO_BACKEND_TOKEN` in that container host, then configure `QLOO_BACKEND_URL` and the same `QLOO_BACKEND_TOKEN` in the Site runtime. Configure the optional model values only in the backend. Run `npm test`, build and publish the Site source, then verify the public URL and access mode. See [backend setup](qloo-backend/README.md).
+The Qloo kit states serverless function runtimes are **not** supported: the harness needs a Node 22.19+ container.
+Duet ships a `Dockerfile` and a `render.yaml`.
 
-Do not set a credential in a browser bundle, localStorage, repository, screenshot, or public demo instructions.
+1. Push this repository.
+2. In Render: **New → Blueprint**, point it at the repo. It reads `render.yaml`.
+3. Set `QLOO_API_KEY` (and optionally `LLM_API_KEY` / `LLM_MODEL`) in the dashboard. Never in the repo.
+4. Health check is `/api/health`; the app reports `mode: "live"` only when a credential is present.
 
-## Tests
+The free Render plan sleeps when idle, so the first request after a quiet period is slow. Use a paid instance for a
+recorded demo if cold starts matter.
 
-Run npm test for recipe metadata, constraint verification, procurement, response normalization, Worker routes, the agent tool loop and the real subprocess adapter. Run npm run test:e2e for browser coverage of both planning methods, supply-shock replanning, history, CSV export and mobile overflow. Model and Qloo fixtures are synthetic; they make no external provider calls. Restricted runtimes may need local network permission for subprocess and browser execution.
+## Qloo surface used
 
-## Hackathon references
+Only the surfaces the hackathon kit supports, and only two commands:
 
-- [Qloo Agentic Hackathon rules](https://qloo.devpost.com/rules)
-- [Qloo public API docs](https://github.com/qloo/docs-public)
-- [Qloo Hackathon Kit](https://github.com/qloo/qloo-hackathon-kit)
-- [USDA FoodData Central API](https://fdc.nal.usda.gov/api-guide/)
+```bash
+qloo api search   --query "Fela Kuti" --type music --take 1 --json
+qloo api insights --type restaurant --signal-entities <ids> --filter-location "Brooklyn, NY" --take 30 --json
+```
+
+A duet costs **2 search calls + 2 insights calls**, or fewer when the cache is warm. Search results are cached by
+`(type, name)` and rankings by `(signal ids, city, take)` for 30 minutes, because the event quota is finite and a
+repeated demo should cost nothing.
+
+## Provenance and responsible data
+
+- The credential lives only in the server process. It is never sent to the browser, logged, or embedded in a page.
+- Each result carries `mode`, `generatedAt`, the exact calls, and the scoring rule used.
+- Only public entity names and a city are transmitted. No names, emails, device IDs or demographic signals.
+- Qloo returns **aggregate cultural affinities**. The UI does not present them as a prediction of any individual,
+  and it never labels a taste as an identity.
+- Sample mode is explicit and permanent in the UI. Fixture venues are invented; synthetic rankings are never
+  presented as Qloo output.
+
+## What is not yet proven
+
+Being precise about this matters more than looking finished:
+
+| Item | Status |
+| --- | --- |
+| Scoring engine, merge, buckets, cache, HTTP API | Tested (53 tests) |
+| Harness invocation and response parsing | Verified against harness `0.1.26`; auth failure path verified with a rejected key |
+| A successful live Qloo response | **Not yet run** — needs the event credential |
+| Whether `affinity` is populated for place insights | **Unknown until `npm run check:qloo` runs** |
+| Whether tags are sufficient to separate shared from divergent taste | **Unknown until live data exists** |
+| Model-written verdict | Implemented and fixture-tested; falls back to the deterministic writer |
+| Venue quality in a given city | Not evaluated |
+
+Until the live check passes, treat every number in the UI as sample data.
 
 ## Known limitations
 
-- No event key or container host was available when this version was built; live Qloo calls and the three-profile experiment remain pending.
-- Qloo cuisine-to-recipe mapping may be empty or ambiguous.
-- Ingredient prices and quantity needs are illustrative. Labor, yield loss, nutrition, equipment throughput and local currency conversion are not modeled.
-- The 35% vegetarian share is a planning assumption, not measured attendance.
-- Scenario persistence is browser-local; there is no account, database or server-side plan history.
-- Recent plans are kept only for the open browser session and are cleared when the demo is reset or reloaded.
-- The heuristic is deterministic but not globally optimal.
+- Two people only. Three-way compromise is a different problem and is not attempted.
+- Fixed to restaurants. The entity type is a constant, not a setting.
+- City is a free-text Qloo location query; a typo returns empty or distant results.
+- The harmonic mean assumes the two affinity scales are comparable. That is a real assumption, stated here rather
+  than hidden.
+- A place missing from one person's top 30 is scored 0. It might be rank 31. The UI shows the difference between
+  "absent" and "disliked" in the run log but the joint score treats both as a miss.
+- No accounts, no persistence. Nothing is stored server-side beyond the TTL cache.
+
+## Repository layout
+
+```
+server/
+  index.mjs       HTTP server: 4 JSON endpoints + static assets
+  agent.mjs       the run: resolve → rank twice → join → read taste → write verdict
+  qloo.mjs        harness wrapper, response normalisation, typed errors
+  compromise.mjs  scoring rule, buckets, tag comparison (pure functions)
+  narrate.mjs     deterministic verdict writer
+  model.mjs       optional OpenAI-compatible verdict writer
+  fixtures.mjs    labeled sample data used only when no credential exists
+  cache.mjs       TTL + LRU
+public/           the app: one page, no framework
+tests/            53 tests across scoring, parsing, agent and HTTP
+scripts/          check-qloo.mjs
+```
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

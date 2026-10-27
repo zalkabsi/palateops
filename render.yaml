@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: duet
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # Set these in the Render dashboard. They are never committed.
+      - key: QLOO_API_KEY
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_MODEL
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: DUET_MODE
+        value: live

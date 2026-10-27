@@ -1,9 +1,11 @@
 .git
+.github
 node_modules
-dist
+npm-debug.log
 .env
 .env.*
 docs
 tests
-*.tar.gz
-*.tgz
+*.md
+!package.json
+.DS_Store

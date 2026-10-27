@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#14332a" />
+    <title>Duet — two people, one honest answer</title>
+    <meta
+      name="description"
+      content="Duet asks Qloo what each of you loves, ranks the same real places for both of you, and shows exactly where your taste actually meets."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#builder">Skip to set up a duet</a>
+
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Duet home">
+        <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
+        <span class="brand-name">duet</span>
+      </a>
+      <p class="topbar-note">Taste-grounded compromise, powered by Qloo</p>
+      <div class="topbar-right">
+        <span class="mode-badge" id="modeBadge" data-mode="unknown" title="Data source for this session">
+          <span class="dot" aria-hidden="true"></span><span id="modeText">checking</span>
+        </span>
+        <a class="ghost-link" href="#how">How it works</a>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="hero">
+        <p class="kicker">The decision, not the search</p>
+        <h1>Two people.<br />One honest answer.</h1>
+        <p class="lede">
+          Every recommender answers &ldquo;what do <em>you</em> want&rdquo;. Duet answers the harder question: given two
+          specific people, which places actually work for both &mdash; and where are you only pretending to agree?
+        </p>
+      </section>
+
+      <section class="builder" id="builder" aria-labelledby="builderTitle">
+        <div class="builder-head">
+          <h2 id="builderTitle">Set up the duet</h2>
+          <p>Start from a duo below, or build both sides from anything you genuinely love.</p>
+        </div>
+
+        <div class="presets" id="presets" role="list" aria-label="Starter duos"></div>
+
+        <div class="pair">
+          <article class="person" data-side="a" aria-labelledby="personAHeading"></article>
+          <div class="pair-seam" aria-hidden="true"><span>meets</span></div>
+          <article class="person" data-side="b" aria-labelledby="personBHeading"></article>
+        </div>
+
+        <div class="commit">
+          <label class="city-field" for="city">
+            <span>City</span>
+            <input id="city" name="city" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="Brooklyn, NY" maxlength="80" />
+          </label>
+          <button class="primary" id="runButton" type="button">
+            <span class="primary-label">Find the overlap</span>
+          </button>
+        </div>
+        <p class="hint" id="commitHint">Two Qloo requests per person. Nothing about your identity is sent.</p>
+        <p class="error" id="error" role="alert" hidden></p>
+      </section>
+
+      <section class="result" id="result" aria-live="polite" hidden></section>
+
+      <section class="how" id="how">
+        <h2>How the answer is made</h2>
+        <ol class="steps">
+          <li>
+            <strong>Each taste becomes a Qloo signal.</strong>
+            An artist, a film, a brand, a book &mdash; Qloo resolves each to a real entity.
+          </li>
+          <li>
+            <strong>Qloo ranks the same real places twice.</strong>
+            Once for each person, in the same city. Never a blended average of the two.
+          </li>
+          <li>
+            <strong>Duet joins the two rankings.</strong>
+            A place has to win twice to be called a shared choice. The joint score is a harmonic mean, so a place
+            one of you merely tolerates cannot beat a place you both like.
+          </li>
+          <li>
+            <strong>You see the evidence.</strong>
+            Both scores, the tags behind them, and the exact calls that produced them.
+          </li>
+        </ol>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        <span id="footMode">Data source pending</span> &middot;
+        <a href="https://github.com/zalkabsi/palateops">Source</a> &middot;
+        <a href="https://github.com/qloo/qloo-hackathon-kit">Qloo hackathon kit</a>
+      </p>
+      <p class="fineprint">
+        Qloo returns aggregate cultural affinities, not individual preferences or predictions. Duet sends only public
+        entity names and a city.
+      </p>
+    </footer>
+  </body>
+</html>

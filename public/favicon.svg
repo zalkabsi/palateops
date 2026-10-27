@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Duet">
+  <rect width="64" height="64" rx="14" fill="#14332a" />
+  <rect x="17" y="26" width="9" height="22" rx="4.5" fill="#dce97a" opacity="0.72" />
+  <rect x="30" y="16" width="9" height="32" rx="4.5" fill="#dce97a" />
+  <rect x="43" y="30" width="9" height="18" rx="4.5" fill="#dce97a" opacity="0.88" />
+</svg>

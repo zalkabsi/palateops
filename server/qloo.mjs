@@ -22,8 +22,17 @@ export const HARNESS_MIN_VERSION = "0.1.26";
 export const DEFAULT_SEARCH_LIMIT = 8;
 export const DEFAULT_VENUE_LIMIT = 30;
 
+/**
+ * Hackathon keys only work against this host. Using the production or staging
+ * host with an event key returns 401 even when the key is valid - the single
+ * most common integration mistake in the event guide.
+ */
+export const HACKATHON_BASE_URL = "https://hackathon.api.qloo.com";
+
 const DEFAULT_TIMEOUT_MS = 25_000;
-const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+// The guide states field filtering is not supported, so insights responses are
+// verbose. Allow generous headroom rather than truncating a valid payload.
+const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
 
 /** Taste domains offered in the profile builder. Alias maps to a Qloo entity URN. */
 export const TASTE_TYPES = Object.freeze([
@@ -71,6 +80,24 @@ export function resolveHarness(env = process.env) {
 }
 
 /**
+ * Resolve the environment the harness should run with.
+ *
+ * The harness refuses a non-official base URL unless it is explicitly trusted,
+ * so a hackathon base URL must be paired with QLOO_TRUSTED_BASE_URL. Doing that
+ * here means a deployment cannot half-configure itself into a confusing 401.
+ */
+export function harnessEnv(env = process.env) {
+  const baseUrl = (typeof env.QLOO_BASE_URL === "string" && env.QLOO_BASE_URL.trim()) || "";
+  const trusted = (typeof env.QLOO_TRUSTED_BASE_URL === "string" && env.QLOO_TRUSTED_BASE_URL.trim()) || baseUrl;
+  return {
+    ...env,
+    NO_COLOR: "1",
+    QLOO_NO_UPDATE_CHECK: "1",
+    ...(baseUrl ? { QLOO_BASE_URL: baseUrl, QLOO_TRUSTED_BASE_URL: trusted } : {}),
+  };
+}
+
+/**
  * Run the harness and capture stdout. Rejects with QlooError on transport failure.
  */
 export function runHarness(args, { env = process.env, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
@@ -83,7 +110,7 @@ export function runHarness(args, { env = process.env, timeoutMs = DEFAULT_TIMEOU
         timeout: timeoutMs,
         maxBuffer: MAX_OUTPUT_BYTES,
         windowsHide: true,
-        env: { ...env, NO_COLOR: "1", QLOO_NO_UPDATE_CHECK: "1" },
+        env: harnessEnv(env),
       },
       (error, stdout, stderr) => {
         // The harness reports provider failures as JSON on stdout with exit 0 or
@@ -194,6 +221,7 @@ export function normalizeEntity(raw, { includeTags = true } = {}) {
     subtype: text(raw.subtype) || "urn:entity:place",
     popularity: numeric(raw.popularity),
     affinity: pickAffinity(raw),
+    priceLevel: integer(raw.properties?.price_level ?? raw.price_level),
     address: text(raw.address?.formatted) || text(raw.properties?.address?.formatted) || text(raw.address),
     tags,
   };
@@ -229,6 +257,8 @@ export async function searchEntities({ query, type, take = DEFAULT_SEARCH_LIMIT 
   const safeQuery = text(query).slice(0, 120);
   if (!safeQuery) throw new QlooError("Type something to search Qloo.", { code: "EMPTY_QUERY", status: 400 });
   const safeType = TASTE_ALIASES.has(type) ? type : "";
+  // Field filtering is not supported by the event API, so ask for the default
+  // payload and reduce it locally.
   const args = ["api", "search", "--query", safeQuery, "--take", String(clampInt(take, 1, 12, DEFAULT_SEARCH_LIMIT)), "--json"];
   if (safeType) args.splice(2, 0, "--type", safeType);
   const payload = await runHarness(args, options);
@@ -241,7 +271,7 @@ export async function searchEntities({ query, type, take = DEFAULT_SEARCH_LIMIT 
  * Ask Qloo which venues in `city` best match one person's taste signals.
  * Accepts either resolved signal objects or bare entity IDs.
  */
-export async function recommendPlaces({ signals, city, take = DEFAULT_VENUE_LIMIT }, options = {}) {
+export async function recommendPlaces({ signals, city, take = DEFAULT_VENUE_LIMIT, maxPriceLevel = null }, options = {}) {
   const ids = (Array.isArray(signals) ? signals : [])
     .map((signal) => (typeof signal === "string" ? signal : signal?.id))
     .map(text)
@@ -257,6 +287,10 @@ export async function recommendPlaces({ signals, city, take = DEFAULT_VENUE_LIMI
     "--json",
   ];
   if (safeCity) args.push("--filter-location", safeCity);
+  // The CLI has no price flag, but `--params` merges raw documented parameters.
+  if (Number.isInteger(maxPriceLevel) && maxPriceLevel >= 1 && maxPriceLevel <= 4) {
+    args.push("--params", JSON.stringify({ "filter.price_level.max": maxPriceLevel }));
+  }
   const payload = await runHarness(args, options);
   return extractEntities(payload)
     .map((entity) => normalizeEntity(entity))
@@ -277,4 +311,8 @@ export async function harnessVersion(options = {}) {
   } catch {
     return "unavailable";
   }
+}
+
+function integer(value) {
+  return Number.isInteger(value) ? value : null;
 }

@@ -1,16 +1,17 @@
 /**
- * The duet agent.
+ * PalateOps agent.
  *
- * Runs a fixed, observable tool sequence:
- *   1. resolve each person's signals to Qloo entity IDs
- *   2. ask Qloo for that person's best venues in the city
- *   3. join both rankings with the compromise rule
- *   4. read the shared and divergent taste vocabulary
- *   5. write the verdict (model-assisted when a model is configured)
+ * Job: produce one place a group of 2-5 people can actually agree on, and be
+ * honest when that place does not exist under the current constraints.
  *
- * Every step is timed and recorded so the UI can show what actually happened.
- * A model never invents numbers: it only receives computed evidence and returns
- * prose. The deterministic path produces the same structure without a model.
+ * The loop is plan -> act -> observe -> revise. Qloo is asked to rank places
+ * once per person, never once for the group, because averaging people away is
+ * the exact failure this product exists to fix. If no place clears everybody,
+ * the agent does not shrug: it relaxes one constraint, re-asks Qloo, and says
+ * what it gave up.
+ *
+ * Tools are injected, so the whole loop is testable without a network, and a
+ * model policy can later choose the relaxations instead of the fixed policy.
  */
 
 import { compareTaste, joinCandidates, summarize, tagProfile } from "./compromise.mjs";
@@ -18,67 +19,92 @@ import { cacheKey } from "./cache.mjs";
 import { narrate } from "./narrate.mjs";
 import { requestNarration } from "./model.mjs";
 
+export const MAX_PEOPLE = 5;
+export const MIN_PEOPLE = 2;
 export const MAX_SIGNALS_PER_PERSON = 6;
 export const VENUE_LIMIT = 30;
 
-export class DuetInputError extends Error {
+/** Constraints the agent is allowed to loosen, in the order it loosens them. */
+export const RELAXATIONS = Object.freeze([
+  {
+    id: "price",
+    label: "Removed the price ceiling",
+    reason: "No place cleared everyone inside the budget, so the ceiling was dropped.",
+    apply: (constraints) => (constraints.maxPriceLevel == null ? null : { ...constraints, maxPriceLevel: null }),
+  },
+  {
+    id: "depth",
+    label: "Looked deeper into each ranking",
+    reason: "Still no shared place, so the agent asked Qloo for a deeper list per person.",
+    apply: (constraints) => (constraints.take >= 50 ? null : { ...constraints, take: 50 }),
+  },
+]);
+
+export class PlanInputError extends Error {
   constructor(message) {
     super(message);
-    this.name = "DuetInputError";
+    this.name = "PlanInputError";
     this.status = 400;
   }
 }
 
 /** Validate and normalise the request body. */
-export function parseDuetInput(body) {
-  if (!body || typeof body !== "object") throw new DuetInputError("Send a JSON body.");
+export function parsePlanInput(body) {
+  if (!body || typeof body !== "object") throw new PlanInputError("Send a JSON body.");
   const city = typeof body.city === "string" ? body.city.trim().slice(0, 80) : "";
-  if (city.length < 2) throw new DuetInputError("Choose a city so Qloo can rank real places.");
-  const a = parseSide(body.a, "first person");
-  const b = parseSide(body.b, "second person");
-  return { city, a, b };
+  if (city.length < 2) throw new PlanInputError("Choose a city so Qloo can rank real places.");
+
+  const rawPeople = Array.isArray(body.people) ? body.people : [];
+  if (rawPeople.length < MIN_PEOPLE) throw new PlanInputError(`Add at least ${MIN_PEOPLE} people — a compromise needs two sides.`);
+  if (rawPeople.length > MAX_PEOPLE) throw new PlanInputError(`This works with up to ${MAX_PEOPLE} people.`);
+
+  const people = rawPeople.map((person, index) => parsePerson(person, index));
+  const maxPriceLevel = Number.isInteger(body.maxPriceLevel) && body.maxPriceLevel >= 1 && body.maxPriceLevel <= 4
+    ? body.maxPriceLevel
+    : null;
+
+  return { city, people, constraints: { maxPriceLevel, take: VENUE_LIMIT } };
 }
 
-function parseSide(side, position) {
-  if (!side || typeof side !== "object") throw new DuetInputError(`Add a taste profile for the ${position}.`);
-  const label = (typeof side.label === "string" ? side.label.trim() : "").slice(0, 24) || "Someone";
-  const rawSignals = Array.isArray(side.signals) ? side.signals : [];
+function parsePerson(person, index) {
+  if (!person || typeof person !== "object") throw new PlanInputError(`Person ${index + 1} is missing a taste profile.`);
+  const label = (typeof person.label === "string" ? person.label.trim() : "").slice(0, 24) || `Person ${index + 1}`;
+  const rawSignals = Array.isArray(person.signals) ? person.signals : [];
   const signals = [];
   for (const signal of rawSignals) {
     const name = typeof signal?.name === "string" ? signal.name.trim().slice(0, 120) : "";
-    const type = typeof signal?.type === "string" ? signal.type.trim().toLowerCase() : "";
+    const type = typeof signal?.type === "string" ? signal.type.trim().toLowerCase() : "music";
     const id = typeof signal?.id === "string" ? signal.id.trim().slice(0, 180) : "";
     if (!name) continue;
-    const duplicate = signals.some((entry) => entry.name.toLowerCase() === name.toLowerCase() && entry.type === type);
-    if (duplicate) continue;
-    signals.push({ name, type: type || "music", id });
+    if (signals.some((entry) => entry.name.toLowerCase() === name.toLowerCase() && entry.type === type)) continue;
+    signals.push({ name, type, id });
     if (signals.length >= MAX_SIGNALS_PER_PERSON) break;
   }
-  if (signals.length === 0) throw new DuetInputError(`Add at least one taste signal for the ${position}.`);
+  if (signals.length === 0) throw new PlanInputError(`Add at least one taste signal for ${label}.`);
   return { label, signals };
 }
 
 /**
- * Run one duet.
+ * Run one plan.
  *
  * @param {object} options
- * @param {{city:string,a:object,b:object}} options.input
+ * @param {{city:string, people:object[], constraints:object}} options.input
  * @param {ReturnType<import("./dataSource.mjs").createDataSource>} options.data
  * @param {ReturnType<import("./cache.mjs").createCache>} options.cache
- * @param {object|null} options.model configured model provider, or null
+ * @param {object|null} options.model
  */
-export async function runDuet({ input, data, cache, model = null }) {
+export async function runPlan({ input, data, cache, model = null }) {
   const trace = [];
   const calls = [];
+  const decisions = [];
 
   const step = async (tool, label, run) => {
     const startedAt = Date.now();
-    const entry = { tool, label, startedAt: new Date().toISOString() };
+    const entry = { tool, label, at: new Date().toISOString() };
     try {
       const result = await run();
       entry.ok = true;
       entry.ms = Date.now() - startedAt;
-      entry.detail = describe(result);
       trace.push(entry);
       return result;
     } catch (error) {
@@ -90,23 +116,19 @@ export async function runDuet({ input, data, cache, model = null }) {
     }
   };
 
-  step.record = () => trace;
-  step.calls = () => calls;
-
-  const resolveSide = async (side, key) => {
+  // ---- 1. resolve every person's taste into Qloo entities ------------------
+  const resolvedPeople = [];
+  for (const person of input.people) {
     const resolved = [];
-    for (const signal of side.signals) {
-      if (signal.id) {
-        resolved.push({ ...signal });
-        continue;
-      }
-      const cacheId = cacheKey("resolve", signal.type, signal.name);
-      const value = await step("search", `Resolve "${signal.name}" to a Qloo entity`, async () => {
-        const hit = await cache.wrap(cacheId, async () => data.search({ query: signal.name, type: signal.type, take: 1 }));
-        calls.push({ tool: "qloo api search", args: { query: signal.name, type: signal.type, take: 1 }, cached: hit.hit });
-        return hit.value;
+    for (const signal of person.signals) {
+      if (signal.id) { resolved.push({ ...signal }); continue; }
+      const key = cacheKey("resolve", signal.type, signal.name);
+      const found = await step("search", `Resolve "${signal.name}" for ${person.label}`, async () => {
+        const { value, hit } = await cache.wrap(key, async () => data.search({ query: signal.name, type: signal.type, take: 1 }));
+        calls.push({ tool: "qloo api search", args: { query: signal.name, type: signal.type, take: 1 }, cached: hit });
+        return value;
       });
-      const entity = Array.isArray(value) ? value[0] : null;
+      const entity = Array.isArray(found) ? found[0] : null;
       if (!entity?.id) {
         trace.push({ tool: "search", label: `No Qloo match for "${signal.name}"`, ok: false, ms: 0, detail: "skipped" });
         continue;
@@ -114,35 +136,98 @@ export async function runDuet({ input, data, cache, model = null }) {
       resolved.push({ name: entity.name, type: signal.type, id: entity.id, resolvedFrom: signal.name });
     }
     if (resolved.length === 0) {
-      throw new DuetInputError(`None of ${side.label}'s signals could be matched to a Qloo entity. Try different names.`);
+      throw new PlanInputError(`None of ${person.label}'s signals could be matched to a Qloo entity. Try different names.`);
     }
-    return resolved;
+    resolvedPeople.push({ label: person.label, signals: resolved });
+  }
+
+  // ---- 2. plan / act / observe, relaxing until somebody can win -----------
+  const initialConstraints = { ...input.constraints };
+  let constraints = { ...initialConstraints };
+  const attempts = [];
+
+  const rankEveryone = async (active) => {
+    const lists = [];
+    for (const person of resolvedPeople) {
+      const ids = person.signals.map((signal) => signal.id).sort();
+      const key = cacheKey("places", ids, input.city, active.take, active.maxPriceLevel ?? "any");
+      const places = await step(
+        "rank_places",
+        `Rank places in ${input.city} for ${person.label}${active.maxPriceLevel ? ` (≤ level ${active.maxPriceLevel})` : ""}`,
+        async () => {
+          const { value, hit } = await cache.wrap(key, async () => data.recommend({
+            signals: person.signals,
+            city: input.city,
+            take: active.take,
+            maxPriceLevel: active.maxPriceLevel,
+          }));
+          calls.push({
+            tool: "qloo api insights",
+            args: { type: "restaurant", signals: ids.length, city: input.city, take: active.take, maxPriceLevel: active.maxPriceLevel },
+            cached: hit,
+          });
+          return value;
+        },
+      );
+      lists.push({ label: person.label, entities: places });
+    }
+    return joinCandidates(lists);
   };
 
-  const resolvedA = await resolveSide(input.a, "a");
-  const resolvedB = await resolveSide(input.b, "b");
+  let joined = await rankEveryone(constraints);
+  let summary = summarize(joined.venues, resolvedPeople.length);
+  attempts.push({ constraints: { ...constraints }, everyoneCount: summary.everyoneCount, total: summary.total });
 
-  const fetchVenues = async (side, resolved) => step("score_places", `Rank places in ${input.city} for ${side.label}`, async () => {
-    const ids = resolved.map((signal) => signal.id).sort();
-    const key = cacheKey("places", ids, input.city, VENUE_LIMIT);
-    const { value, hit } = await cache.wrap(key, async () => data.recommend({ signals: resolved, city: input.city, take: VENUE_LIMIT }));
-    calls.push({ tool: "qloo api insights", args: { type: "restaurant", signals: ids.length, city: input.city, take: VENUE_LIMIT }, cached: hit });
-    return value;
+  for (const relaxation of RELAXATIONS) {
+    if (summary.everyoneCount > 0) break;
+    const next = relaxation.apply(constraints);
+    if (!next) continue;
+    constraints = next;
+    decisions.push({ kind: "relax", id: relaxation.id, label: relaxation.label, reason: relaxation.reason });
+    trace.push({ tool: "revise_plan", label: `Revise: ${relaxation.label.toLowerCase()}`, ok: true, ms: 0, detail: "agent decision" });
+    joined = await rankEveryone(constraints);
+    summary = summarize(joined.venues, resolvedPeople.length);
+    attempts.push({ constraints: { ...constraints }, everyoneCount: summary.everyoneCount, total: summary.total });
+  }
+
+  // ---- 3. read the group's taste vocabulary -------------------------------
+  const profiles = resolvedPeople.map((person, index) => ({
+    label: person.label,
+    vocab: tagProfile(
+      joined.venues
+        .map((venue) => ({ ...venue, score: venue.scores[index] }))
+        .filter((venue) => venue.score > 0)
+        .sort((a, b) => b.score - a.score),
+    ),
+  }));
+  const taste = compareTaste(profiles);
+
+  const deterministic = narrate({
+    summary,
+    taste,
+    venues: joined.venues,
+    people: resolvedPeople.map((person) => person.label),
+    city: input.city,
+    attempts,
+    decisions,
+    constraints: initialConstraints,
   });
-
-  const placesA = await fetchVenues(input.a, resolvedA);
-  const placesB = await fetchVenues(input.b, resolvedB);
-
-  const venues = joinCandidates(placesA, placesB);
-  const summary = summarize(venues);
-  const taste = compareTaste(tagProfile(byPerson(venues, "affinityA")), tagProfile(byPerson(venues, "affinityB")));
-  const deterministic = narrate({ summary, taste, venues, a: input.a, b: input.b, city: input.city });
 
   let narration = deterministic;
   let narrationSource = "rules";
   if (model?.configured) {
     const generated = await step("write_verdict", "Write the verdict", () =>
-      requestNarration({ model, evidence: { city: input.city, a: input.a, b: input.b, summary, taste, venues: venues.slice(0, 6) } }));
+      requestNarration({
+        model,
+        evidence: {
+          city: input.city,
+          people: resolvedPeople.map((person) => ({ label: person.label, signals: person.signals })),
+          summary,
+          taste,
+          decisions,
+          venues: joined.venues.slice(0, 8),
+        },
+      }));
     if (generated) {
       narration = generated;
       narrationSource = model.provider ?? "model";
@@ -153,40 +238,25 @@ export async function runDuet({ input, data, cache, model = null }) {
     mode: data.mode,
     city: input.city,
     generatedAt: new Date().toISOString(),
-    people: {
-      a: { label: input.a.label, signals: resolvedA, pool: placesA.length },
-      b: { label: input.b.label, signals: resolvedB, pool: placesB.length },
-    },
-    venues,
+    people: resolvedPeople.map((person) => ({ label: person.label, signals: person.signals })),
+    constraints,
+    venues: joined.venues,
     groups: {
-      both: venues.filter((venue) => venue.bucket === "both").slice(0, 6),
-      middle: venues.filter((venue) => venue.bucket === "middle").slice(0, 6),
-      trade: venues.filter((venue) => venue.bucket === "trade").slice(0, 6),
+      everyone: joined.venues.filter((venue) => venue.bucket === "everyone").slice(0, 6),
+      most: joined.venues.filter((venue) => venue.bucket === "most").slice(0, 6),
+      trade: joined.venues.filter((venue) => venue.bucket === "trade").slice(0, 6),
     },
     taste,
     summary,
+    negotiation: { attempts, decisions, settledAfter: attempts.length },
     narration,
     narrationSource,
     trace,
     provenance: {
       mode: data.mode,
       calls: calls.map((call, index) => ({ ...call, index: index + 1 })),
-      venueCount: venues.length,
-      rule: "Scores are Qloo affinities when provided, otherwise Qloo rank position. The pair is combined with a harmonic mean.",
+      venueCount: joined.venues.length,
+      rule: "Each person's places are scored from Qloo's affinity when returned, otherwise from rank position. The group score is a harmonic mean over everyone: one indifferent person drags it to zero.",
     },
   };
 }
-
-function byPerson(venues, key) {
-  return venues
-    .map((venue) => ({ ...venue, score: venue[key] }))
-    .filter((venue) => venue.score > 0)
-    .sort((left, right) => right.score - left.score);
-}
-
-function describe(result) {
-  if (Array.isArray(result)) return `${result.length} result${result.length === 1 ? "" : "s"}`;
-  return "done";
-}
-
-export { tagProfile };

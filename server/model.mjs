@@ -27,12 +27,12 @@ export function resolveModel(env = process.env) {
   };
 }
 
-const SYSTEM_PROMPT = `You write the verdict for Duet, an app that finds venues two people will both like.
+const SYSTEM_PROMPT = `You write the verdict for PalateOps, an agent that finds one restaurant a group of 2-5 people will all like.
 
 Rules:
 - Use ONLY the evidence provided. Never invent a venue, tag, or number.
 - Never mention Qloo, scores, algorithms, or that you are a model.
-- Write to the two people directly, in a dry, specific, human voice. No hype.
+- Write to the group directly, in a dry, specific, human voice. No hype.
 - "headline": max 8 words. "detail": max 45 words. "advice": max 35 words.
 - Return JSON only, with keys headline, detail, advice.`;
 
@@ -68,19 +68,22 @@ export async function requestNarration({ model, evidence, fetchImpl = fetch }) {
 function compact(evidence) {
   return {
     city: evidence.city,
-    people: [
-      { name: evidence.a.label, signals: evidence.a.signals.map((signal) => signal.name).slice(0, 6) },
-      { name: evidence.b.label, signals: evidence.b.signals.map((signal) => signal.name).slice(0, 6) },
-    ],
+    people: (evidence.people ?? []).map((person) => ({
+      name: person.label,
+      signals: (person.signals ?? []).map((signal) => signal.name).slice(0, 6),
+    })),
     overlap_share: evidence.summary.overlap,
-    places_liked_by_both: evidence.summary.bothCount,
-    shared_taste_tags: evidence.taste.shared.map((entry) => entry.tag).slice(0, 5),
-    only_first: evidence.taste.onlyA.map((entry) => entry.tag).slice(0, 3),
-    only_second: evidence.taste.onlyB.map((entry) => entry.tag).slice(0, 3),
-    top_shared_places: evidence.venues
-      .filter((venue) => venue.bucket === "both" || venue.bucket === "trade")
+    places_liked_by_all: evidence.summary.everyoneCount,
+    shared_taste_tags: (evidence.taste?.shared ?? []).map((entry) => entry.tag).slice(0, 5),
+    each_persons_own_tags: (evidence.taste?.individual ?? []).map((entry) => ({
+      name: entry.label,
+      tags: entry.tags.map((tag) => tag.tag).slice(0, 3),
+    })),
+    constraints_dropped: (evidence.decisions ?? []).map((decision) => decision.label),
+    top_shared_places: (evidence.venues ?? [])
+      .filter((venue) => venue.bucket === "everyone" || venue.bucket === "trade")
       .slice(0, 4)
-      .map((venue) => ({ name: venue.name, first: venue.affinityA, second: venue.affinityB })),
+      .map((venue) => ({ name: venue.name, scores: venue.scores })),
   };
 }
 

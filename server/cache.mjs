@@ -2,7 +2,7 @@
  * Small TTL + LRU cache.
  *
  * The hackathon kit asks for the smallest request that answers the product
- * question and for caching only what the project needs. A duet session costs
+ * question and for caching only what the project needs. A planning session costs
  * two Qloo calls; repeat visits with the same signals should cost zero.
  */
 

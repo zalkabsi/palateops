@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { extractEntities, normalizeEntity, parseHarnessJson } from "../server/qloo.mjs";
+import { HACKATHON_BASE_URL, extractEntities, harnessEnv, normalizeEntity, parseHarnessJson } from "../server/qloo.mjs";
 
 describe("parseHarnessJson", () => {
   it("reads a bare JSON array printed by `--json`", () => {
@@ -87,5 +87,34 @@ describe("extractEntities", () => {
 
   it("returns an empty list for an unexpected shape", () => {
     assert.deepEqual(extractEntities({ results: {} }), []);
+  });
+});
+
+describe("harnessEnv", () => {
+  it("pairs a custom base URL with the trust flag the harness requires", () => {
+    const env = harnessEnv({ QLOO_API_KEY: "k", QLOO_BASE_URL: HACKATHON_BASE_URL });
+    assert.equal(env.QLOO_BASE_URL, HACKATHON_BASE_URL);
+    assert.equal(env.QLOO_TRUSTED_BASE_URL, HACKATHON_BASE_URL);
+  });
+
+  it("keeps an explicit trusted base URL", () => {
+    const env = harnessEnv({ QLOO_BASE_URL: "https://hackathon.api.qloo.com", QLOO_TRUSTED_BASE_URL: "https://hackathon.api.qloo.com" });
+    assert.equal(env.QLOO_TRUSTED_BASE_URL, "https://hackathon.api.qloo.com");
+  });
+
+  it("adds nothing when no base URL is configured", () => {
+    const env = harnessEnv({ QLOO_API_KEY: "k" });
+    assert.equal(env.QLOO_BASE_URL, undefined);
+    assert.equal(env.QLOO_TRUSTED_BASE_URL, undefined);
+  });
+});
+
+describe("price level", () => {
+  it("reads the documented place property", () => {
+    assert.equal(normalizeEntity({ entity_id: "a", name: "Kori", properties: { price_level: 3 } }).priceLevel, 3);
+  });
+
+  it("leaves price level null when absent", () => {
+    assert.equal(normalizeEntity({ entity_id: "a", name: "Kori" }).priceLevel, null);
   });
 });

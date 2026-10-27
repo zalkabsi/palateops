@@ -5,13 +5,13 @@ import { after, before, describe, it } from "node:test";
 import { createApp } from "../server/index.mjs";
 import { createCache } from "../server/cache.mjs";
 import { narrate } from "../server/narrate.mjs";
-import { summarize, joinCandidates } from "../server/compromise.mjs";
+import { joinCandidates, summarize } from "../server/compromise.mjs";
 
 let server;
 let base;
 
 before(async () => {
-  const app = createApp({ DUET_MODE: "fixture" });
+  const app = createApp({ DUET_MODE: "fixture", QLOO_API_KEY: "" });
   server = createServer(app.handle);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -19,65 +19,77 @@ before(async () => {
 
 after(() => new Promise((resolve) => server.close(resolve)));
 
-const duetBody = {
+const planBody = {
   city: "Brooklyn, NY",
-  a: { label: "Sam", signals: [{ name: "Fela Kuti", type: "music" }] },
-  b: { label: "Jules", signals: [{ name: "Aesop", type: "brand" }] },
+  maxPriceLevel: 3,
+  people: [
+    { label: "Sam", signals: [{ name: "Fela Kuti", type: "music" }] },
+    { label: "Jules", signals: [{ name: "Aesop", type: "brand" }] },
+  ],
 };
 
 describe("server", () => {
   it("reports fixture mode honestly", async () => {
-    const response = await fetch(`${base}/api/health`);
-    const body = await response.json();
-    assert.equal(response.status, 200);
+    const body = await (await fetch(`${base}/api/health`)).json();
+    assert.equal(body.status, "ok");
     assert.equal(body.mode, "fixture");
     assert.equal(body.qlooConfigured, false);
   });
 
-  it("serves the shell page", async () => {
+  it("serves the shell page with a content security policy", async () => {
     const response = await fetch(`${base}/`);
     assert.equal(response.status, 200);
-    assert.match(await response.text(), /Duet/);
+    assert.match(await response.text(), /PalateOps/);
     assert.match(response.headers.get("content-security-policy"), /default-src 'self'/);
   });
 
-  it("serves starter duos and taste domains", async () => {
+  it("serves starter groups and taste domains", async () => {
     const body = await (await fetch(`${base}/api/presets`)).json();
     assert.ok(body.presets.length >= 3);
+    assert.ok(body.presets.some((preset) => preset.people.length >= 3));
     assert.ok(body.tasteTypes.some((entry) => entry.alias === "music"));
   });
 
   it("rejects a search that is too short to be useful", async () => {
-    const response = await fetch(`${base}/api/search?q=a`);
-    assert.equal(response.status, 400);
+    assert.equal((await fetch(`${base}/api/search?q=a`)).status, 400);
   });
 
-  it("runs a duet and returns evidence", async () => {
-    const response = await fetch(`${base}/api/duet`, {
+  it("runs a plan and returns evidence", async () => {
+    const response = await fetch(`${base}/api/plan`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(duetBody),
+      body: JSON.stringify(planBody),
     });
     const body = await response.json();
     assert.equal(response.status, 200);
     assert.equal(body.mode, "fixture");
+    assert.equal(body.people.length, 2);
     assert.ok(body.venues.length > 0);
     assert.ok(body.narration.headline.length > 0);
     assert.ok(body.provenance.calls.length >= 2);
+    assert.ok(body.negotiation);
   });
 
-  it("rejects a duet without a city", async () => {
-    const response = await fetch(`${base}/api/duet`, {
+  it("rejects a plan without a city", async () => {
+    const response = await fetch(`${base}/api/plan`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ...duetBody, city: "" }),
+      body: JSON.stringify({ ...planBody, city: "" }),
+    });
+    assert.equal(response.status, 400);
+  });
+
+  it("rejects a group of one", async () => {
+    const response = await fetch(`${base}/api/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ...planBody, people: [planBody.people[0]] }),
     });
     assert.equal(response.status, 400);
   });
 
   it("requires a JSON content type", async () => {
-    const response = await fetch(`${base}/api/duet`, { method: "POST", body: "city=Brooklyn" });
-    assert.equal(response.status, 415);
+    assert.equal((await fetch(`${base}/api/plan`, { method: "POST", body: "city=Brooklyn" })).status, 415);
   });
 
   it("404s an unknown API route without leaking internals", async () => {
@@ -86,46 +98,61 @@ describe("server", () => {
     assert.deepEqual(await response.json(), { error: "Unknown endpoint." });
   });
 
-  it("refuses to serve files outside the public directory", async () => {
+  it("never serves source files", async () => {
     const response = await fetch(`${base}/../server/index.mjs`);
     assert.ok([200, 403, 404].includes(response.status));
-    const body = await response.text();
-    assert.equal(body.includes("QLOO_API_KEY"), false);
+    assert.equal((await response.text()).includes("QLOO_API_KEY"), false);
   });
 });
 
 describe("narrate", () => {
-  it("names a shared winner when one exists", () => {
-    const venues = joinCandidates(
-      [{ id: "1", name: "Almanac", affinity: 0.8, tags: [], address: "" }],
-      [{ id: "1", name: "Almanac", affinity: 0.7, tags: [], address: "" }],
-    );
+  const build = (leftAffinity, rightAffinity) =>
+    joinCandidates([
+      { label: "Sam", entities: [{ id: "1", name: "Almanac", affinity: leftAffinity, tags: [], address: "" }] },
+      { label: "Jules", entities: [{ id: "1", name: "Almanac", affinity: rightAffinity, tags: [], address: "" }] },
+    ]);
+
+  it("names a shared winner and reports both scores", () => {
+    const { venues } = build(0.8, 0.7);
     const copy = narrate({
-      summary: summarize(venues),
-      taste: { shared: [], onlyA: [], onlyB: [] },
+      summary: summarize(venues, 2),
+      taste: { shared: [], individual: [] },
       venues,
-      a: { label: "Sam" },
-      b: { label: "Jules" },
+      people: ["Sam", "Jules"],
       city: "Brooklyn, NY",
     });
     assert.match(copy.advice, /Book Almanac/);
-    assert.match(copy.advice, /80%/);
+    assert.match(copy.advice, /80% for Sam/);
   });
 
   it("does not claim a shared winner when there is none", () => {
-    const venues = joinCandidates(
-      [{ id: "1", name: "Jazz", affinity: 0.9, tags: [], address: "" }],
-      [{ id: "2", name: "Pasta", affinity: 0.9, tags: [], address: "" }],
-    );
+    const { venues } = joinCandidates([
+      { label: "Sam", entities: [{ id: "1", name: "Jazz", affinity: 0.9, tags: [], address: "" }] },
+      { label: "Jules", entities: [{ id: "2", name: "Pasta", affinity: 0.9, tags: [], address: "" }] },
+    ]);
     const copy = narrate({
-      summary: summarize(venues),
-      taste: { shared: [], onlyA: [], onlyB: [] },
+      summary: summarize(venues, 2),
+      taste: { shared: [], individual: [] },
       venues,
-      a: { label: "Sam" },
-      b: { label: "Jules" },
+      people: ["Sam", "Jules"],
       city: "Brooklyn, NY",
     });
     assert.doesNotMatch(copy.advice, /^Book/);
+    assert.equal(copy.negotiated, null);
+  });
+
+  it("admits what the agent gave up", () => {
+    const { venues } = build(0.8, 0.7);
+    const copy = narrate({
+      summary: summarize(venues, 2),
+      taste: { shared: [], individual: [] },
+      venues,
+      people: ["Sam", "Jules"],
+      city: "Brooklyn, NY",
+      decisions: [{ id: "price", label: "Removed the price ceiling" }],
+      constraints: { maxPriceLevel: 2 },
+    });
+    assert.match(copy.negotiated, /price ceiling/i);
   });
 });
 

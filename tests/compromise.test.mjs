@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  BOTH_THRESHOLD,
+  EVERYONE_THRESHOLD,
   compareTaste,
   joinCandidates,
-  mix,
+  mixMany,
   scoreEntity,
   summarize,
   tagProfile,
   verdictFor,
 } from "../server/compromise.mjs";
 
-const venue = (id, name, tags, affinity = null) => ({
+const place = (id, name, tags, affinity = null) => ({
   id,
   name,
   address: "",
@@ -20,6 +20,8 @@ const venue = (id, name, tags, affinity = null) => ({
   affinity,
   tags: (tags ?? []).map((tag) => ({ id: `t-${tag}`, name: tag, type: "urn:tag" })),
 });
+
+const lists = (...entries) => entries.map(([label, entities]) => ({ label, entities }));
 
 describe("scoreEntity", () => {
   it("trusts a Qloo affinity when one is present", () => {
@@ -36,98 +38,115 @@ describe("scoreEntity", () => {
   });
 });
 
-describe("mix", () => {
-  it("rewards a venue both people like over one that only one loves", () => {
-    assert.ok(mix(0.7, 0.7) > mix(0.95, 0.2));
+describe("mixMany", () => {
+  it("rewards a place everybody likes over one a single person loves", () => {
+    assert.ok(mixMany([0.7, 0.7]) > mixMany([0.95, 0.2]));
   });
 
-  it("returns zero when either person does not want it", () => {
-    assert.equal(mix(0.9, 0), 0);
+  it("returns zero as soon as one person is uninterested", () => {
+    assert.equal(mixMany([0.9, 0, 0.9]), 0);
+  });
+
+  it("handles groups larger than two", () => {
+    assert.equal(mixMany([0.6, 0.6, 0.6]), 0.6);
+    assert.ok(mixMany([0.6, 0.6, 0.6]) > mixMany([0.9, 0.9, 0.1]));
   });
 
   it("is symmetric", () => {
-    assert.equal(mix(0.62, 0.44), mix(0.44, 0.62));
+    assert.equal(mixMany([0.62, 0.44, 0.8]), mixMany([0.8, 0.62, 0.44]));
+  });
+
+  it("returns zero for an empty group", () => {
+    assert.equal(mixMany([]), 0);
   });
 });
 
 describe("joinCandidates", () => {
-  it("marks a venue both people rank as a shared choice", () => {
-    const venues = joinCandidates([venue("1", "Almanac", [], 0.8)], [venue("1", "Almanac", [], 0.75)]);
+  it("marks a place every person ranks as a shared answer", () => {
+    const { venues } = joinCandidates(lists(["A", [place("1", "Almanac", [], 0.8)]], ["B", [place("1", "Almanac", [], 0.75)]]));
     assert.equal(venues.length, 1);
-    assert.equal(venues[0].bucket, "both");
-    assert.ok(venues[0].compromise >= BOTH_THRESHOLD);
+    assert.equal(venues[0].bucket, "everyone");
+    assert.ok(venues[0].joint >= EVERYONE_THRESHOLD);
   });
 
-  it("keeps a one-sided venue out of the shared bucket", () => {
-    const venues = joinCandidates(
-      [venue("1", "Jazz Bar", [], 0.9)],
-      [venue("2", "Pasta Place", [], 0.9)],
+  it("keeps a one-sided place out of the shared bucket", () => {
+    const { venues } = joinCandidates(lists(["A", [place("1", "Jazz", [], 0.9)]], ["B", [place("2", "Pasta", [], 0.9)]]));
+    assert.equal(venues.filter((venue) => venue.bucket === "everyone").length, 0);
+    assert.ok(venues.some((venue) => venue.bucket === "trade"));
+  });
+
+  it("records absence as zero rather than dropping the place", () => {
+    const { venues } = joinCandidates(lists(["A", [place("1", "A", [], 0.9)]], ["B", [place("2", "B", [], 0.9)]]));
+    const first = venues.find((venue) => venue.id === "1");
+    assert.deepEqual(first.scores, [0.9, 0]);
+    assert.equal(first.present, 1);
+  });
+
+  it("keeps scores aligned to the people, not to arrival order", () => {
+    const { venues, people } = joinCandidates(
+      lists(["Ann", [place("x", "Same", [], 0.4)]], ["Bo", [place("x", "Same", [], 0.9)]], ["Cy", [place("x", "Same", [], 0.6)]]),
     );
-    assert.equal(venues.filter((entry) => entry.bucket === "both").length, 0);
-    assert.ok(venues.some((entry) => entry.bucket === "trade"));
-  });
-
-  it("records absence as a zero rather than dropping the venue", () => {
-    const venues = joinCandidates([venue("1", "A", [], 0.9)], [venue("2", "B", [], 0.9)]);
-    const first = venues.find((entry) => entry.id === "1");
-    assert.equal(first.affinityB, 0);
-    assert.equal(first.rankB, null);
+    assert.deepEqual(people, ["Ann", "Bo", "Cy"]);
+    assert.deepEqual(venues[0].scores, [0.4, 0.9, 0.6]);
   });
 
   it("records Qloo affinity provenance", () => {
-    const fromAffinity = joinCandidates([venue("1", "A", [], 0.8)], [venue("1", "A", [], 0.8)]);
-    assert.equal(fromAffinity[0].affinitySource, "qloo");
-    const fromRank = joinCandidates([venue("1", "A", [], null)], [venue("1", "A", [], null)]);
-    assert.equal(fromRank[0].affinitySource, "rank");
+    const withAffinity = joinCandidates(lists(["A", [place("1", "A", [], 0.8)]], ["B", [place("1", "A", [], 0.8)]]));
+    assert.equal(withAffinity.venues[0].affinitySource, "qloo");
+    const fromRank = joinCandidates(lists(["A", [place("1", "A", [], null)]], ["B", [place("1", "A", [], null)]]));
+    assert.equal(fromRank.venues[0].affinitySource, "rank");
   });
 
-  it("sorts by joint score, not by either person's preference", () => {
-    const venues = joinCandidates(
-      [venue("1", "A", [], 0.99), venue("2", "B", [], 0.7)],
-      [venue("1", "A", [], 0.2), venue("2", "B", [], 0.7)],
+  it("sorts by group score, not by any single preference", () => {
+    const { venues } = joinCandidates(
+      lists(["A", [place("1", "Loud", [], 0.99), place("2", "Shared", [], 0.7)]], ["B", [place("1", "Loud", [], 0.2), place("2", "Shared", [], 0.7)]]),
     );
     assert.equal(venues[0].id, "2");
   });
 });
 
-describe("tagProfile and compareTaste", () => {
-  it("separates shared taste from a one-sided obsession", () => {
-    const left = tagProfile([
-      { ...venue("1", "x", ["natural wine", "jazz"]), score: 0.9 },
-      { ...venue("2", "y", ["natural wine"]), score: 0.8 },
-    ]);
-    const right = tagProfile([
-      { ...venue("3", "z", ["natural wine", "rooftop"]), score: 0.9 },
-      { ...venue("4", "w", ["natural wine"]), score: 0.7 },
-    ]);
-    const taste = compareTaste(left, right);
+describe("taste comparison", () => {
+  it("separates shared taste from one person's obsession", () => {
+    const profiles = [
+      { label: "A", vocab: tagProfile([{ ...place("1", "x", ["natural wine", "jazz"]), score: 0.9 }]) },
+      { label: "B", vocab: tagProfile([{ ...place("2", "y", ["natural wine"]), score: 0.9 }]) },
+    ];
+    const taste = compareTaste(profiles);
     assert.ok(taste.shared.some((entry) => entry.tag === "natural wine"));
-    assert.equal(taste.shared.some((entry) => entry.tag === "jazz"), false);
+    assert.ok(taste.individual[0].tags.some((entry) => entry.tag === "jazz"));
+  });
+
+  it("requires every person to rank a tag highly for it to be shared", () => {
+    const profiles = [
+      { label: "A", vocab: new Map([["jazz", 1]]) },
+      { label: "B", vocab: new Map([["jazz", 1]]) },
+      { label: "C", vocab: new Map([["jazz", 0.1]]) },
+    ];
+    assert.equal(compareTaste(profiles).shared.length, 0);
   });
 
   it("ignores tags that describe what a place is rather than how it feels", () => {
-    assert.equal(tagProfile([{ ...venue("1", "x", ["Restaurant", "jazz"]), score: 1 }]).has("restaurant"), false);
+    assert.equal(tagProfile([{ ...place("1", "x", ["Restaurant", "jazz"]), score: 1 }]).has("restaurant"), false);
   });
 
-  it("returns empty groups when a profile has no tags", () => {
-    assert.deepEqual(compareTaste(new Map(), new Map()), { shared: [], onlyA: [], onlyB: [] });
+  it("returns empty groups when there is nothing to compare", () => {
+    assert.deepEqual(compareTaste([]), { shared: [], individual: [] });
   });
 });
 
-describe("summarize", () => {
-  it("computes overlap as a share of every venue seen", () => {
-    const venues = joinCandidates(
-      [venue("1", "A", [], 0.9), venue("2", "B", [], 0.9)],
-      [venue("1", "A", [], 0.9), venue("3", "C", [], 0.9)],
+describe("summary", () => {
+  it("computes overlap as a share of every place seen", () => {
+    const { venues } = joinCandidates(
+      lists(["A", [place("1", "A", [], 0.9), place("2", "B", [], 0.9)]], ["B", [place("1", "A", [], 0.9), place("3", "C", [], 0.9)]]),
     );
-    const summary = summarize(venues);
+    const summary = summarize(venues, 2);
     assert.equal(summary.total, 3);
-    assert.equal(summary.bothCount, 1);
+    assert.equal(summary.everyoneCount, 1);
     assert.equal(summary.overlap, 0.333);
   });
 
   it("is honest when nothing overlaps", () => {
-    assert.equal(verdictFor({ overlap: 0, bothCount: 0, total: 4 }).tone, "hard");
-    assert.equal(verdictFor({ overlap: 0, bothCount: 0, total: 0 }).headline, "No shared ground found");
+    assert.equal(verdictFor({ overlap: 0, everyoneCount: 0, total: 4 }).tone, "hard");
+    assert.equal(verdictFor({ overlap: 0, everyoneCount: 0, total: 0 }).headline, "No shared ground found");
   });
 });

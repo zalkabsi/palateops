@@ -1,32 +1,30 @@
 /**
- * The compromise engine.
+ * The negotiation engine.
  *
- * Qloo ranks venues for ONE taste profile. The product question here is
- * different: which venues survive BOTH profiles? That requires a scoring rule
- * that is defensible, explainable and honest about what it does not know.
+ * Qloo ranks places for ONE taste profile. This product asks a different
+ * question: which places survive the rankings of 2-5 different people at once?
+ * That requires a rule that is defensible, explainable, and honest when the
+ * honest answer is "nobody agrees".
  *
- * Rule: each venue gets a score in [0,1] per person, then the pair is combined
- * with the harmonic mean. The harmonic mean punishes one-sided winners, so a
- * 0.95/0.20 venue scores below a 0.70/0.70 venue. That is the entire thesis of
- * the product, so the maths lives in one small testable module.
+ * Pure functions only. Everything here is unit tested without a network.
  */
 
 const EPSILON = 1e-9;
 
-/** Venues below this joint score are never presented as a shared choice. */
-export const BOTH_THRESHOLD = 0.55;
-/** Above this single-profile score a venue is offered as a deliberate trade. */
+/** A place must clear this joint score for everyone to count as a shared answer. */
+export const EVERYONE_THRESHOLD = 0.55;
+/** Above this single-person score, a one-sided place is offered as a trade. */
 export const TRADE_THRESHOLD = 0.6;
 
-/** Tags that describe what a place is, not what it feels like. Excluded from taste reading. */
+/** Tags that describe what a place *is*, not how it *feels*. */
 const GENERIC_TAGS = new Set([
   "restaurant", "food", "bar", "cafe", "establishment", "point of interest", "dining",
   "food and drink", "eat and drink", "lounge", "pub", "nightlife", "service",
 ]);
 
 /**
- * Convert Qloo's ranking into a normalised score.
- * When Qloo returns an affinity we trust it; otherwise position is the evidence.
+ * Convert Qloo's ranking into a normalised score in [0,1].
+ * A returned affinity is the strongest evidence; otherwise position is.
  */
 export function scoreEntity(entity, index, total) {
   const affinity = entity?.affinity;
@@ -34,89 +32,90 @@ export function scoreEntity(entity, index, total) {
     return round(affinity);
   }
   if (!Number.isFinite(total) || total <= 1) return 1;
-  const boundedIndex = Math.min(Math.max(index, 0), total - 1);
-  return round(1 - boundedIndex / total);
-}
-
-/** Harmonic mean of two scores. Returns 0 when either person is uninterested. */
-export function mix(a, b) {
-  const left = clamp01(a);
-  const right = clamp01(b);
-  if (left <= EPSILON || right <= EPSILON) return 0;
-  return round((2 * left * right) / (left + right));
+  const bounded = Math.min(Math.max(index, 0), total - 1);
+  return round(1 - bounded / total);
 }
 
 /**
- * Join two independently ranked venue lists into one compromise table.
+ * Generalised harmonic mean over N people.
  *
- * A venue absent from a person's list is not evidence of dislike - it is
- * evidence of "not in their top N". It scores 0 and lands in `trade` at best,
- * which keeps the distinction visible in the UI.
+ * The harmonic mean is dominated by the smallest input, so one person's
+ * indifference drags the score down hard. That is the whole product: an
+ * arithmetic mean would let one enthusiast outvote everybody else, which is
+ * exactly the failure of every "average the group" recommender.
+ *
+ * Returns 0 when anybody is uninterested.
  */
-export function joinCandidates(listA, listB) {
-  const scoredA = annotate(listA);
-  const scoredB = annotate(listB);
+export function mixMany(scores) {
+  const values = Array.isArray(scores) ? scores.map(clamp01) : [];
+  if (values.length === 0) return 0;
+  if (values.some((value) => value <= EPSILON)) return 0;
+  let inverseSum = 0;
+  for (const value of values) inverseSum += 1 / value;
+  return round(values.length / inverseSum);
+}
+
+/**
+ * Join N independently ranked lists into one table.
+ *
+ * @param {Array<{label: string, entities: Array}>} lists one entry per person
+ */
+export function joinCandidates(lists) {
+  const people = lists.map((entry) => entry.label);
   const byId = new Map();
 
-  for (const entry of scoredA) {
-    byId.set(entry.entity.id, { ...entry.entity, scoreA: entry.score, scoreB: 0, rankA: entry.rank, rankB: null, sourceA: entry.source, sourceB: "absent" });
-  }
-  for (const entry of scoredB) {
-    const existing = byId.get(entry.entity.id);
-    if (existing) {
-      existing.scoreB = entry.score;
-      existing.rankB = entry.rank;
-      existing.sourceB = entry.source;
-      continue;
-    }
-    byId.set(entry.entity.id, { ...entry.entity, scoreA: 0, scoreB: entry.score, rankA: null, rankB: entry.rank, sourceA: "absent", sourceB: entry.source });
-  }
+  lists.forEach((list, personIndex) => {
+    const entities = Array.isArray(list.entities) ? list.entities.filter(Boolean) : [];
+    entities.forEach((entity, index) => {
+      const score = scoreEntity(entity, index, entities.length);
+      const existing = byId.get(entity.id);
+      const record = existing ?? {
+        ...entity,
+        scores: new Array(lists.length).fill(0),
+        ranks: new Array(lists.length).fill(null),
+        sources: new Array(lists.length).fill("absent"),
+      };
+      record.scores[personIndex] = score;
+      record.ranks[personIndex] = index + 1;
+      record.sources[personIndex] = typeof entity.affinity === "number" ? "qloo" : "rank";
+      byId.set(entity.id, record);
+    });
+  });
 
   const venues = [...byId.values()].map((venue) => {
-    const compromise = mix(venue.scoreA, venue.scoreB);
+    const joint = mixMany(venue.scores);
+    const present = venue.scores.filter((score) => score > EPSILON).length;
     return {
       id: venue.id,
       name: venue.name,
       address: venue.address,
       popularity: venue.popularity,
-      affinityA: round(venue.scoreA),
-      affinityB: round(venue.scoreB),
-      affinitySource: venue.sourceA === "qloo" && venue.sourceB === "qloo" ? "qloo" : "rank",
-      compromise,
-      rankA: venue.rankA,
-      rankB: venue.rankB,
+      scores: venue.scores.map(round),
+      ranks: venue.ranks,
+      joint,
+      present,
+      of: lists.length,
+      affinitySource: venue.sources.every((source) => source === "qloo") ? "qloo" : "rank",
       tags: venue.tags,
-      bucket: bucketFor(venue.scoreA, venue.scoreB, compromise),
+      bucket: bucketFor(venue.scores, joint),
     };
   });
 
-  venues.sort((left, right) => right.compromise - left.compromise || left.name.localeCompare(right.name));
-  return venues;
+  venues.sort((left, right) => right.joint - left.joint || right.present - left.present || left.name.localeCompare(right.name));
+  return { venues, people };
 }
 
-function annotate(list) {
-  const entities = Array.isArray(list) ? list.filter(Boolean) : [];
-  return entities.map((entity, index) => ({
-    entity,
-    index,
-    rank: index + 1,
-    score: scoreEntity(entity, index, entities.length),
-    source: typeof entity.affinity === "number" && Number.isFinite(entity.affinity) ? "qloo" : "rank",
-  }));
-}
-
-function bucketFor(scoreA, scoreB, compromise) {
-  const bothPresent = scoreA > EPSILON && scoreB > EPSILON;
-  if (bothPresent && compromise >= BOTH_THRESHOLD) return "both";
-  if (bothPresent) return "middle";
-  if (Math.max(scoreA, scoreB) >= TRADE_THRESHOLD) return "trade";
+function bucketFor(scores, joint) {
+  const present = scores.filter((score) => score > EPSILON).length;
+  if (present === scores.length) return joint >= EVERYONE_THRESHOLD ? "everyone" : "most";
+  if (Math.max(...scores) >= TRADE_THRESHOLD) return "trade";
   return "weak";
 }
 
 /**
- * Build a tag vocabulary for one profile from the venues that person's taste
- * ranks highest. This is derived evidence, not a Qloo tag API call: it keeps
- * the request count at two per session and stays explainable.
+ * Build one person's tag vocabulary from the places their own taste ranks
+ * highest. Derived evidence, not a second Qloo call: it keeps a run at N
+ * requests instead of 2N and stays explainable on screen.
  */
 export function tagProfile(venues, { topN = 12 } = {}) {
   const weights = new Map();
@@ -131,9 +130,9 @@ export function tagProfile(venues, { topN = 12 } = {}) {
   }
   const peak = Math.max(0, ...weights.values());
   if (peak <= 0) return new Map();
-  const normalized = new Map();
-  for (const [key, value] of weights) normalized.set(key, value / peak);
-  return normalized;
+  const normalised = new Map();
+  for (const [key, value] of weights) normalised.set(key, value / peak);
+  return normalised;
 }
 
 function normalizeTag(name) {
@@ -141,67 +140,70 @@ function normalizeTag(name) {
 }
 
 /**
- * Compare both vocabularies and return what they share, where they diverge.
- * "Shared" means both people rank it strongly, not merely that it appears twice.
+ * Compare N vocabularies.
+ * `shared` = every person ranks the tag strongly. `individual` = tags only one
+ * person responds to, attributed to them.
  */
-export function compareTaste(vocabA, vocabB, { sharedFloor = 0.42, divergenceFloor = 0.3 } = {}) {
-  const keys = new Set([...vocabA.keys(), ...vocabB.keys()]);
+export function compareTaste(profiles, { sharedFloor = 0.42, divergenceFloor = 0.3 } = {}) {
+  if (!Array.isArray(profiles) || profiles.length === 0) return { shared: [], individual: [] };
+  const keys = new Set();
+  for (const profile of profiles) for (const key of profile.vocab.keys()) keys.add(key);
+
   const shared = [];
-  const onlyA = [];
-  const onlyB = [];
+  const perPerson = profiles.map((profile) => ({ label: profile.label, tags: [] }));
 
   for (const key of keys) {
-    const a = vocabA.get(key) ?? 0;
-    const b = vocabB.get(key) ?? 0;
-    const both = Math.min(a, b);
-    const spread = a - b;
-    if (both >= sharedFloor) shared.push({ tag: key, a: round(a), b: round(b), strength: round(both) });
-    else if (spread >= divergenceFloor) onlyA.push({ tag: key, a: round(a), b: round(b), strength: round(spread) });
-    else if (-spread >= divergenceFloor) onlyB.push({ tag: key, a: round(a), b: round(b), strength: round(-spread) });
+    const values = profiles.map((profile) => profile.vocab.get(key) ?? 0);
+    const lowest = Math.min(...values);
+    const highest = Math.max(...values);
+    if (lowest >= sharedFloor) {
+      shared.push({ tag: key, values: values.map(round), strength: round(lowest) });
+      continue;
+    }
+    if (highest - lowest < divergenceFloor) continue;
+    const ownerIndex = values.indexOf(highest);
+    perPerson[ownerIndex].tags.push({ tag: key, value: round(highest), others: round(lowest), strength: round(highest - lowest) });
   }
 
-  const byStrength = (left, right) => right.strength - left.strength || left.tag.localeCompare(right.tag);
   return {
-    shared: shared.sort(byStrength).slice(0, 8),
-    onlyA: onlyA.sort(byStrength).slice(0, 5),
-    onlyB: onlyB.sort(byStrength).slice(0, 5),
+    shared: shared.sort((left, right) => right.strength - left.strength || left.tag.localeCompare(right.tag)).slice(0, 10),
+    individual: perPerson.map((entry) => ({
+      label: entry.label,
+      tags: entry.tags.sort((a, b) => b.strength - a.strength).slice(0, 6),
+    })),
   };
 }
 
-/**
- * Headline numbers for the result screen.
- * `overlap` is the share of all seen venues that clear the shared threshold -
- * deliberately strict, because an inflated number would make the app useless.
- */
-export function summarize(venues) {
+/** Headline numbers for the result screen. Deliberately strict. */
+export function summarize(venues, peopleCount) {
   const total = venues.length;
-  const both = venues.filter((venue) => venue.bucket === "both");
-  const middle = venues.filter((venue) => venue.bucket === "middle");
+  const everyone = venues.filter((venue) => venue.bucket === "everyone");
+  const most = venues.filter((venue) => venue.bucket === "most");
   const trade = venues.filter((venue) => venue.bucket === "trade");
-  const overlap = total === 0 ? 0 : round(both.length / total);
-  const bestJoint = both.length > 0 ? both[0].compromise : 0;
+  const overlap = total === 0 ? 0 : round(everyone.length / total);
   return {
     total,
-    bothCount: both.length,
-    middleCount: middle.length,
+    everyoneCount: everyone.length,
+    mostCount: most.length,
     tradeCount: trade.length,
+    peopleCount,
     overlap,
-    bestJoint,
-    verdict: verdictFor({ overlap, bothCount: both.length, tradeCount: trade.length, total }),
+    bestJoint: everyone.length > 0 ? everyone[0].joint : 0,
+    verdict: verdictFor({ total, everyoneCount: everyone.length, overlap }),
   };
 }
 
-export function verdictFor({ overlap, bothCount, total }) {
+export function verdictFor({ total, everyoneCount, overlap }) {
   if (total === 0) {
-    return { headline: "No shared ground found", tone: "unknown", detail: "Qloo returned no venues for this city and these signals." };
+    return { headline: "No shared ground found", tone: "unknown", detail: "Qloo returned no places for this city and these tastes." };
   }
-  if (bothCount >= 3 && overlap >= 0.18) {
-    return { headline: "You agree more than you think", tone: "good", detail: "Several places sit in both rankings, not just one lucky overlap." };
+  if (everyoneCount >= 3 && overlap >= 0.18) {
+    return { headline: "The group agrees more than it thinks", tone: "good", detail: "Several places clear every person's ranking, not one lucky overlap." };
   }
-  if (bothCount >= 1) {
+  if (everyoneCount >= 1) {
     return { headline: "There is a real middle", tone: "ok", detail: "The overlap is narrow, so the compromise has to be chosen deliberately." };
   }
-  return { headline: "You are opposites here", tone: "hard", detail: "No venue clears both rankings. This is a trade, not a compromise." };
+  return { headline: "This group is opposites", tone: "hard", detail: "No place clears everybody's ranking. This is a trade, not a compromise." };
 }
 
 function clamp01(value) {

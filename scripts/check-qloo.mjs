@@ -59,7 +59,7 @@ async function main() {
   }
 
   if (withAffinity.length === 0) {
-    console.log("\nNo affinity field came back. Duet will fall back to Quoo rank position,");
+    console.log("\nNo affinity field came back. PalateOps will fall back to Qloo rank position,");
     console.log("which is supported but less precise. Record this in the submission notes.");
   }
   if (withTags.length === 0) {

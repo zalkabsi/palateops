@@ -1,44 +1,55 @@
 /**
- * Duet client.
+ * PalateOps client.
  *
- * No framework: the whole app is one decision screen. Everything the server
- * computed is rendered verbatim; the browser never invents or adjusts a score.
+ * No framework. The screen is one decision: who is at the table, and what can
+ * they agree on. Every number rendered here came from the server; the browser
+ * never invents or adjusts a score.
  */
 
+const MAX_PEOPLE = 5;
+const MIN_PEOPLE = 2;
 const MAX_SIGNALS = 6;
 
 const state = {
   health: null,
   presets: [],
   tasteTypes: [],
-  persons: {
-    a: { label: "You", tagline: "", signals: [] },
-    b: { label: "Them", tagline: "", signals: [] },
-  },
+  people: [
+    { label: "You", tagline: "", signals: [] },
+    { label: "Them", tagline: "", signals: [] },
+  ],
   city: "",
+  maxPriceLevel: "",
   busy: false,
   result: null,
   activePreset: null,
 };
 
-const els = { a: null, b: null };
+/** Per-person DOM handles, rebuilt whenever the group changes shape. */
+let cards = [];
+let searchToken = 0;
+
 const byId = (id) => document.getElementById(id);
 
 init();
 
 async function init() {
-  buildPeople();
   bindCommit();
+  byId("addPerson").addEventListener("click", () => {
+    if (state.people.length >= MAX_PEOPLE) return;
+    state.people.push({ label: `Person ${state.people.length + 1}`, tagline: "", signals: [] });
+    markCustom();
+    renderPeople();
+  });
   await Promise.all([loadHealth(), loadPresets()]);
   renderMode();
 }
 
-/* ---------------- mode + presets ---------------- */
+/* ---------------- mode ---------------- */
 
 async function loadHealth() {
   try {
-    const response = await fetch("/api/health");
-    state.health = await response.json();
+    state.health = await (await fetch("/api/health")).json();
   } catch {
     state.health = { mode: "unknown", qlooConfigured: false };
   }
@@ -48,8 +59,7 @@ function renderMode() {
   const mode = state.health?.mode ?? "unknown";
   const badge = byId("modeBadge");
   badge.dataset.mode = mode;
-  byId("modeText").textContent =
-    mode === "live" ? "Live Qloo" : mode === "fixture" ? "Sample data" : "Offline";
+  byId("modeText").textContent = mode === "live" ? "Live Qloo" : mode === "fixture" ? "Sample data" : "Offline";
   byId("footMode").textContent =
     mode === "live"
       ? "Live Qloo responses"
@@ -58,35 +68,19 @@ function renderMode() {
         : "Data source unavailable";
 }
 
+/* ---------------- presets ---------------- */
+
 async function loadPresets() {
   try {
-    const response = await fetch("/api/presets");
-    const payload = await response.json();
+    const payload = await (await fetch("/api/presets")).json();
     state.presets = payload.presets ?? [];
     state.tasteTypes = payload.tasteTypes ?? [];
   } catch {
     state.presets = [];
     state.tasteTypes = [];
   }
-  fillDomains();
   renderPresets();
   applyInitialState();
-}
-
-/**
- * First load fills the form with a starter duo so the screen is never empty.
- * Shareable links override it: ?preset=<id> prefills, &run=1 runs it.
- */
-function applyInitialState() {
-  const params = new URLSearchParams(window.location.search);
-  const presetId = params.get("preset");
-  const targetId = presetId || state.presets[0]?.id;
-  if (!targetId) return;
-  const preset = state.presets.find((entry) => entry.id === targetId);
-  if (!preset) return;
-  const button = document.querySelector(`.preset[data-preset="${CSS.escape(preset.id)}"]`);
-  if (button) applyPreset(preset, button);
-  if (presetId && params.get("run") === "1") setTimeout(run, 60);
 }
 
 function renderPresets() {
@@ -106,96 +100,125 @@ function renderPresets() {
 }
 
 function applyPreset(preset, button) {
-  const active = state.activePreset === preset.id;
-  for (const other of document.querySelectorAll(".preset")) other.setAttribute("aria-pressed", "false");
-  if (active) {
+  if (state.activePreset === preset.id) {
+    for (const other of document.querySelectorAll(".preset")) other.setAttribute("aria-pressed", "false");
     state.activePreset = null;
     return;
   }
+  for (const other of document.querySelectorAll(".preset")) other.setAttribute("aria-pressed", "false");
   button.setAttribute("aria-pressed", "true");
   state.activePreset = preset.id;
   state.city = preset.city;
+  state.maxPriceLevel = preset.maxPriceLevel ? String(preset.maxPriceLevel) : "";
   byId("city").value = preset.city;
-
-  for (const side of ["a", "b"]) {
-    const source = preset[side];
-    state.persons[side] = {
-      label: source.label,
-      tagline: source.tagline,
-      signals: source.signals.map((signal) => ({ name: signal.name, type: signal.type, id: "" })),
-    };
-    syncPerson(side);
-  }
+  byId("priceLevel").value = state.maxPriceLevel;
+  state.people = preset.people.map((person) => ({
+    label: person.label,
+    tagline: person.tagline ?? "",
+    signals: person.signals.map((signal) => ({ name: signal.name, type: signal.type, id: "" })),
+  }));
+  renderPeople();
   clearError();
+}
+
+/**
+ * First load fills the form from the first starter group so the screen is
+ * never empty. A shareable link overrides it: ?preset=<id>&run=1.
+ */
+function applyInitialState() {
+  const params = new URLSearchParams(window.location.search);
+  const presetId = params.get("preset");
+  const targetId = presetId || state.presets[0]?.id;
+  if (!targetId) {
+    renderPeople();
+    return;
+  }
+  const preset = state.presets.find((entry) => entry.id === targetId);
+  if (!preset) {
+    renderPeople();
+    return;
+  }
+  const button = document.querySelector(`.preset[data-preset="${CSS.escape(preset.id)}"]`);
+  if (button) applyPreset(preset, button);
+  else renderPeople();
+  if (presetId && params.get("run") === "1") setTimeout(run, 60);
 }
 
 /* ---------------- people ---------------- */
 
-function buildPeople() {
-  for (const side of ["a", "b"]) {
-    const host = document.querySelector(`.person[data-side="${side}"]`);
-    host.innerHTML = `
-      <header class="person-head">
-        <div class="avatar" aria-hidden="true"></div>
-        <div class="person-id">
-          <input class="name-input" type="text" maxlength="24" aria-label="Name for ${side === "a" ? "the first" : "the second"} person" />
-          <p class="person-tagline"></p>
-        </div>
-      </header>
-      <div class="chips" role="list" aria-label="Taste signals"></div>
-      <div class="search-row">
-        <select class="domain-select" aria-label="Taste domain"></select>
-        <input class="search-input" type="text" autocomplete="off" spellcheck="false"
-               placeholder="Search an artist, film, brand…" aria-label="Search for a taste signal" />
-        <div class="suggestions" hidden></div>
-      </div>`;
-
-    const refs = {
-      host,
-      avatar: host.querySelector(".avatar"),
-      name: host.querySelector(".name-input"),
-      tagline: host.querySelector(".person-tagline"),
-      chips: host.querySelector(".chips"),
-      domain: host.querySelector(".domain-select"),
-      input: host.querySelector(".search-input"),
-      suggestions: host.querySelector(".suggestions"),
-    };
-    els[side] = refs;
-
-    refs.name.value = state.persons[side].label;
-    refs.name.addEventListener("input", () => {
-      state.persons[side].label = refs.name.value.trim() || (side === "a" ? "You" : "Them");
-      refs.avatar.textContent = initial(state.persons[side].label);
-      markCustom();
-    });
-
-    refs.input.addEventListener("input", debounce(() => suggest(side), 280));
-    refs.input.addEventListener("keydown", (event) => onSearchKey(event, side));
-    refs.input.addEventListener("blur", () => {
-      // Delay so a click on a suggestion still registers.
-      setTimeout(() => { refs.suggestions.hidden = true; }, 140);
-    });
-
-    syncPerson(side);
-  }
+function renderPeople() {
+  const holder = byId("people");
+  holder.textContent = "";
+  cards = state.people.map((person, index) => personCard(person, index));
+  for (const card of cards) holder.append(card.el);
+  byId("addPerson").disabled = state.people.length >= MAX_PEOPLE;
+  byId("addPerson").hidden = state.people.length >= MAX_PEOPLE;
 }
 
-function fillDomains() {
-  for (const side of ["a", "b"]) {
-    const select = els[side].domain;
-    select.textContent = "";
-    for (const type of state.tasteTypes) {
-      const option = document.createElement("option");
-      option.value = type.alias;
-      option.textContent = type.label;
-      select.append(option);
-    }
+function personCard(person, index) {
+  const el = document.createElement("article");
+  el.className = "person";
+  el.dataset.index = String(index);
+  el.innerHTML = `
+    <header class="person-head">
+      <div class="avatar" aria-hidden="true"></div>
+      <div class="person-id">
+        <input class="name-input" type="text" maxlength="24" aria-label="Name for person ${index + 1}" />
+        <p class="person-tagline"></p>
+      </div>
+      ${state.people.length > MIN_PEOPLE ? '<button class="remove-person" type="button" title="Remove this person">&times;</button>' : ""}
+    </header>
+    <div class="chips" role="list" aria-label="Taste signals"></div>
+    <div class="search-row">
+      <select class="domain-select" aria-label="Taste domain"></select>
+      <input class="search-input" type="text" autocomplete="off" spellcheck="false"
+             placeholder="Search an artist, film, brand…" aria-label="Search a taste signal" />
+      <div class="suggestions" hidden></div>
+    </div>`;
+
+  const refs = {
+    el,
+    index,
+    avatar: el.querySelector(".avatar"),
+    name: el.querySelector(".name-input"),
+    tagline: el.querySelector(".person-tagline"),
+    chips: el.querySelector(".chips"),
+    domain: el.querySelector(".domain-select"),
+    input: el.querySelector(".search-input"),
+    suggestions: el.querySelector(".suggestions"),
+  };
+
+  for (const type of state.tasteTypes) {
+    const option = document.createElement("option");
+    option.value = type.alias;
+    option.textContent = type.label;
+    refs.domain.append(option);
   }
+
+  refs.name.addEventListener("input", () => {
+    state.people[index].label = refs.name.value.trim() || `Person ${index + 1}`;
+    refs.avatar.textContent = initial(state.people[index].label);
+    markCustom();
+  });
+
+  refs.input.addEventListener("input", debounce(() => suggest(refs), 280));
+  refs.input.addEventListener("keydown", (event) => onSearchKey(event, refs));
+  refs.input.addEventListener("blur", () => setTimeout(() => { refs.suggestions.hidden = true; }, 140));
+
+  const remove = el.querySelector(".remove-person");
+  remove?.addEventListener("click", () => {
+    if (state.people.length <= MIN_PEOPLE) return;
+    state.people.splice(index, 1);
+    markCustom();
+    renderPeople();
+  });
+
+  syncCard(refs);
+  return refs;
 }
 
-function syncPerson(side) {
-  const refs = els[side];
-  const person = state.persons[side];
+function syncCard(refs) {
+  const person = state.people[refs.index];
   refs.name.value = person.label;
   refs.avatar.textContent = initial(person.label);
   refs.tagline.textContent = person.tagline || "";
@@ -204,7 +227,7 @@ function syncPerson(side) {
   if (person.signals.length === 0) {
     const empty = document.createElement("p");
     empty.className = "chips-empty";
-    empty.textContent = "Nothing yet — add something you actually love.";
+    empty.textContent = "Nothing yet — add something they actually love.";
     refs.chips.append(empty);
     return;
   }
@@ -219,9 +242,9 @@ function syncPerson(side) {
     remove.innerHTML = "&times;";
     remove.setAttribute("aria-label", `Remove ${signal.name}`);
     remove.addEventListener("click", () => {
-      state.persons[side].signals = person.signals.filter((entry) => entry !== signal);
+      person.signals = person.signals.filter((entry) => entry !== signal);
       markCustom();
-      syncPerson(side);
+      syncCard(refs);
     });
     chip.append(remove);
     refs.chips.append(chip);
@@ -230,33 +253,29 @@ function syncPerson(side) {
 
 /* ---------------- search ---------------- */
 
-let requestToken = 0;
-
-async function suggest(side) {
-  const refs = els[side];
+async function suggest(refs) {
   const query = refs.input.value.trim();
   if (query.length < 2) {
     refs.suggestions.hidden = true;
     return;
   }
-  const token = ++requestToken;
+  const token = ++searchToken;
   refs.suggestions.hidden = false;
   refs.suggestions.innerHTML = `<p class="sug-note">Searching…</p>`;
   try {
     const type = refs.domain.value || "music";
     const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=${encodeURIComponent(type)}`);
     const payload = await response.json();
-    if (token !== requestToken) return;
+    if (token !== searchToken) return;
     if (!response.ok) throw new Error(payload.error || "Search failed.");
-    renderSuggestions(side, payload.results ?? [], type);
+    renderSuggestions(refs, payload.results ?? [], type);
   } catch (error) {
-    if (token !== requestToken) return;
+    if (token !== searchToken) return;
     refs.suggestions.innerHTML = `<p class="sug-note">${esc(error.message)}</p>`;
   }
 }
 
-function renderSuggestions(side, results, type) {
-  const refs = els[side];
+function renderSuggestions(refs, results, type) {
   refs.suggestions.textContent = "";
   if (results.length === 0) {
     refs.suggestions.innerHTML = `<p class="sug-note">Nothing matched. Try a different spelling.</p>`;
@@ -268,14 +287,13 @@ function renderSuggestions(side, results, type) {
     button.innerHTML = `<span>${esc(entity.name)}</span><span class="sug-type">${esc(type)}</span>`;
     button.addEventListener("mousedown", (event) => {
       event.preventDefault();
-      addSignal(side, { name: entity.name, type, id: entity.id ?? "" });
+      addSignal(refs, { name: entity.name, type, id: entity.id ?? "" });
     });
     refs.suggestions.append(button);
   }
 }
 
-function onSearchKey(event, side) {
-  const refs = els[side];
+function onSearchKey(event, refs) {
   const options = [...refs.suggestions.querySelectorAll("button")];
   if (event.key === "Escape") { refs.suggestions.hidden = true; return; }
   if (event.key === "Enter" && options.length > 0) {
@@ -284,19 +302,15 @@ function onSearchKey(event, side) {
   }
 }
 
-function addSignal(side, signal) {
-  const person = state.persons[side];
+function addSignal(refs, signal) {
+  const person = state.people[refs.index];
   if (person.signals.length >= MAX_SIGNALS) return;
-  const duplicate = person.signals.some(
-    (entry) => entry.name.toLowerCase() === signal.name.toLowerCase() && entry.type === signal.type,
-  );
-  if (duplicate) return;
+  if (person.signals.some((entry) => entry.name.toLowerCase() === signal.name.toLowerCase() && entry.type === signal.type)) return;
   person.signals.push(signal);
-  const refs = els[side];
   refs.input.value = "";
   refs.suggestions.hidden = true;
   markCustom();
-  syncPerson(side);
+  syncCard(refs);
   refs.input.focus();
   clearError();
 }
@@ -313,6 +327,10 @@ function bindCommit() {
     state.city = event.target.value;
     clearError();
   });
+  byId("priceLevel").addEventListener("change", (event) => {
+    state.maxPriceLevel = event.target.value;
+    clearError();
+  });
   byId("runButton").addEventListener("click", run);
 }
 
@@ -322,27 +340,28 @@ async function run() {
 
   const city = byId("city").value.trim();
   if (city.length < 2) return fail("Choose a city, for example “Brooklyn, NY”.");
-  if (state.persons.a.signals.length === 0) return fail("Add at least one taste signal for the first person.");
-  if (state.persons.b.signals.length === 0) return fail("Add at least one taste signal for the second person.");
+  if (state.people.length < MIN_PEOPLE) return fail("A compromise needs at least two people.");
+  const empty = state.people.findIndex((person) => person.signals.length === 0);
+  if (empty >= 0) return fail(`Add at least one taste signal for ${state.people[empty].label}.`);
 
   state.busy = true;
   const button = byId("runButton");
   button.disabled = true;
   button.dataset.busy = "true";
-  byId("commitHint").textContent = "Resolving signals and ranking places…";
+  byId("commitHint").textContent = "Resolving taste and ranking places…";
 
   try {
-    const response = await fetch("/api/duet", {
+    const response = await fetch("/api/plan", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         city,
-        a: { label: state.persons.a.label, signals: state.persons.a.signals },
-        b: { label: state.persons.b.label, signals: state.persons.b.signals },
+        maxPriceLevel: state.maxPriceLevel ? Number(state.maxPriceLevel) : undefined,
+        people: state.people.map((person) => ({ label: person.label, signals: person.signals })),
       }),
     });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "The duet could not be completed.");
+    if (!response.ok) throw new Error(payload.error || "The agent could not finish.");
     state.result = payload;
     renderResult(payload);
   } catch (error) {
@@ -351,7 +370,8 @@ async function run() {
     state.busy = false;
     button.disabled = false;
     button.dataset.busy = "false";
-    byId("commitHint").textContent = "Two Qloo requests per person. Nothing about your identity is sent.";
+    byId("commitHint").textContent =
+      "One Qloo request per person. The agent will loosen the price ceiling rather than return nothing.";
   }
 }
 
@@ -371,42 +391,41 @@ function clearError() {
 
 function renderResult(result) {
   const host = byId("result");
-  const nameA = result.people.a.label;
-  const nameB = result.people.b.label;
+  const names = result.people.map((person) => person.label);
   const overlapPct = Math.round((result.summary.overlap ?? 0) * 100);
 
   host.innerHTML = `
     ${result.mode === "fixture" ? fixtureNotice() : ""}
+    ${result.narration.negotiated ? negotiationCallout(result) : ""}
     <section class="verdict">
       <div class="verdict-copy">
-        <p class="verdict-eyebrow">${esc(result.city)} · ${result.summary.total} places ranked twice</p>
+        <p class="verdict-eyebrow">${esc(result.city)} · ${result.summary.total} places ranked for ${names.length} people</p>
         <h2>${esc(result.narration.headline)}</h2>
         <p class="verdict-detail">${esc(result.narration.detail)}</p>
         <p class="verdict-advice">${esc(result.narration.advice)}</p>
       </div>
       <div class="overlap">
         <span class="overlap-value">${overlapPct}%</span>
-        <span class="overlap-label">of places work<br />for both of you</span>
+        <span class="overlap-label">of places work<br />for everyone</span>
         <div class="overlap-rail"><i style="width:${overlapPct}%"></i></div>
         <button class="verdict-copy-btn" id="copyButton" type="button">Copy the verdict</button>
       </div>
     </section>
 
-    <section class="taste" aria-label="Shared and divergent taste">
-      ${tasteColumn("shared", "You both respond to", result.taste.shared, nameA, nameB)}
-      ${tasteColumn("a", `${nameA} only`, result.taste.onlyA, nameA, nameB)}
-      ${tasteColumn("b", `${nameB} only`, result.taste.onlyB, nameA, nameB)}
+    <section class="taste" style="--people:${names.length}" aria-label="Shared and individual taste">
+      ${tasteShared(result.taste.shared, names)}
+      ${result.taste.individual.map((entry) => tasteIndividual(entry)).join("")}
     </section>
 
     <div class="groups">
-      ${venueGroup("Both of you", "Ranked highly for both. These are the answers.", result.groups.both, "both", nameA, nameB)}
-      ${venueGroup("The middle", "Neither loves it, neither objects. The safe compromise.", result.groups.middle, "middle", nameA, nameB)}
-      ${venueGroup("Worth a trade", "Strong for one of you only. Someone is conceding here.", result.groups.trade, "trade", nameA, nameB)}
+      ${venueGroup("Everyone", "Ranked highly for every person. These are the answers.", result.groups.everyone, "everyone", names)}
+      ${venueGroup("Most of you", "Nobody objects. Nobody is excited either.", result.groups.most, "most", names)}
+      ${venueGroup("One person's pick", "Strong for one person only. Somebody is conceding here.", result.groups.trade, "trade", names)}
     </div>
 
     <section class="receipt">
       <div class="panel">
-        <h3>What ran</h3>
+        <h3>What the agent did</h3>
         <div class="trace">${result.trace.map(traceStep).join("")}</div>
       </div>
       <div class="panel">
@@ -436,14 +455,32 @@ function fixtureNotice() {
     number on this page to a real Qloo response.</p>`;
 }
 
-function tasteColumn(kind, title, entries, nameA, nameB) {
-  const body = entries.length === 0
-    ? `<p class="tag-empty">${kind === "shared" ? "No shared vocabulary found." : "Nothing distinct enough to call out."}</p>`
-    : `<div class="tag-list">${entries.map((entry) => `<span class="tag">${esc(entry.tag)}</span>`).join("")}</div>`;
-  return `<div class="taste-col" data-kind="${kind}"><h3>${esc(title)}</h3>${body}</div>`;
+function negotiationCallout(result) {
+  const decisions = result.negotiation.decisions
+    .map((decision) => `<li><strong>${esc(decision.label)}</strong> — ${esc(decision.reason)}</li>`)
+    .join("");
+  return `<section class="negotiation">
+    <p class="negotiation-tag">The agent changed the plan</p>
+    <p class="negotiation-lead">${esc(result.narration.negotiated)}</p>
+    <ul class="negotiation-list">${decisions}</ul>
+  </section>`;
 }
 
-function venueGroup(title, subtitle, venues, kind, nameA, nameB) {
+function tasteShared(entries, names) {
+  const body = entries.length === 0
+    ? `<p class="tag-empty">No shared vocabulary found — this group has genuinely different taste.</p>`
+    : `<div class="tag-list">${entries.map((entry) => `<span class="tag">${esc(entry.tag)}</span>`).join("")}</div>`;
+  return `<div class="taste-col" data-kind="shared"><h3>All ${names.length} of you</h3>${body}</div>`;
+}
+
+function tasteIndividual(entry) {
+  const body = entry.tags.length === 0
+    ? `<p class="tag-empty">Nothing distinct enough to call out.</p>`
+    : `<div class="tag-list">${entry.tags.map((tag) => `<span class="tag">${esc(tag.tag)}</span>`).join("")}</div>`;
+  return `<div class="taste-col" data-kind="individual"><h3>${esc(entry.label)} only</h3>${body}</div>`;
+}
+
+function venueGroup(title, subtitle, venues, kind, names) {
   if (!venues || venues.length === 0) return "";
   return `
     <section>
@@ -453,34 +490,35 @@ function venueGroup(title, subtitle, venues, kind, nameA, nameB) {
         <span class="group-count">${venues.length}</span>
       </div>
       <div class="venues">
-        ${venues.map((venue) => venueCard(venue, kind, nameA, nameB)).join("")}
+        ${venues.map((venue) => venueCard(venue, kind, names)).join("")}
       </div>
     </section>`;
 }
 
-function venueCard(venue, kind, nameA, nameB) {
+function venueCard(venue, kind, names) {
   const tags = (venue.tags ?? []).slice(0, 4).map((tag) => `<span>${esc(tag.name)}</span>`).join("");
-  const joint = Math.round((venue.compromise ?? 0) * 100);
-  // A zero joint score is not a ranking, it is the absence of one.
-  const badge = kind === "trade" ? "" : `<span class="venue-joint" title="Joint score for both people">${joint}</span>`;
+  const badge = kind === "trade"
+    ? ""
+    : `<span class="venue-joint" title="Group score: the harmonic mean across everyone">${Math.round((venue.joint ?? 0) * 100)}</span>`;
+  const price = venue.priceLevel ? `<span class="venue-price">${"$".repeat(venue.priceLevel)}</span>` : "";
   return `
     <article class="venue" data-bucket="${kind}">
       <div class="venue-head">
         <h4>${esc(venue.name)}</h4>
+        ${price}
         ${badge}
       </div>
       ${venue.address ? `<p class="venue-addr">${esc(venue.address)}</p>` : ""}
       <div class="bars">
-        ${barRow(nameA, venue.affinityA, "a")}
-        ${barRow(nameB, venue.affinityB, "b")}
+        ${names.map((name, index) => barRow(name, venue.scores[index], index)).join("")}
       </div>
       ${tags ? `<div class="venue-tags">${tags}</div>` : ""}
     </article>`;
 }
 
-function barRow(label, value, side) {
+function barRow(label, value, index) {
   const pct = Math.round((value ?? 0) * 100);
-  return `<div class="bar-row" data-side="${side}">
+  return `<div class="bar-row" data-side="${index % 2 === 0 ? "a" : "b"}">
     <span class="bar-who" title="${esc(label)}">${esc(label)}</span>
     <span class="bar-track"><i style="width:${pct}%"></i></span>
     <span class="bar-num">${pct}</span>
@@ -497,6 +535,7 @@ function traceStep(step) {
 
 function callRow(call) {
   const args = Object.entries(call.args ?? {})
+    .filter(([, value]) => value !== null && value !== undefined)
     .map(([key, value]) => `${key}=${Array.isArray(value) ? value.join(",") : value}`)
     .join(" · ");
   return `<tr>
@@ -506,15 +545,15 @@ function callRow(call) {
 }
 
 async function copyVerdict(result) {
-  const nameA = result.people.a.label;
-  const nameB = result.people.b.label;
-  const best = result.groups.both[0] ?? result.groups.trade[0];
+  const names = result.people.map((person) => person.label);
+  const best = result.groups.everyone[0] ?? result.groups.most[0] ?? result.groups.trade[0];
   const lines = [
-    `${result.city} — ${nameA} × ${nameB}`,
+    `${result.city} — ${names.join(", ")}`,
     result.narration.headline,
     "",
+    result.narration.negotiated ?? "",
     result.narration.advice,
-    best ? `→ ${best.name} (${Math.round(best.affinityA * 100)} / ${Math.round(best.affinityB * 100)})` : "",
+    best ? `→ ${best.name}` : "",
   ].filter(Boolean);
 
   try {

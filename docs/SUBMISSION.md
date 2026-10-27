@@ -1,209 +1,140 @@
-# Devpost submission — Duet
+# Devpost submission — PalateOps
 
-Draft copy for the Qloo Agentic Hackathon. It follows the six items the kit's `docs/SUBMISSION.md` asks for, then
-gives paste-ready answers for the Devpost form.
+Draft copy for the Qloo Agentic Hackathon, written against the five eligibility requirements and the judging
+statement ("if your submission would work the same without Qloo, you're building the wrong thing").
 
-**Everything marked ⚠️ is a placeholder that must be replaced with a real value before submitting.**
+Anything marked ⚠️ must be replaced with a real value before submitting.
 
 ---
 
-## 0. The six required items
+## The five eligibility requirements
 
-| Kit requirement | Where it is answered |
+| # | Requirement | Where it is satisfied |
+| --- | --- | --- |
+| 1 | Link to a functional demo app | ⚠️ `https://<service>.onrender.com/?preset=the-table&run=1` |
+| 2 | URL to a public code repository | https://github.com/zalkabsi/palateops — public |
+| 3 | Text description of what the project does | [Description](#description) below |
+| 4 | Externally hosted / fully published | Render Docker service, `render.yaml` in repo. Not local-only |
+| 5 | Open-source license visible in the repo About section | `LICENSE` (MIT) at the repo root — GitHub surfaces it in About |
+
+No demo video is required by the rules. The app itself is the deliverable, so the demo URL must be the strongest
+thing submitted.
+
+---
+
+## Description
+
+**PalateOps is an agent for the hardest table to book: the one a whole group actually agrees on.**
+
+Every restaurant app answers for one person. Group features average the group, which is the wrong operation — an
+average lets a place one person barely tolerates outrank a place everybody likes.
+
+PalateOps takes what each person genuinely loves — an artist, a film, a brand, a book — and asks Qloo to rank the
+*same real restaurants* separately for every person in the group. A place must clear everybody before it is called
+an answer. The group score is a harmonic mean, so any single indifferent person drags it to zero.
+
+Then it negotiates. If no place clears everyone, the agent does not shrug: it drops the price ceiling, asks Qloo
+again, and if that still fails, requests deeper rankings. It tells you exactly what it gave up, and it can say the
+uncomfortable thing — *this group is opposites*. The result screen shows both the shared answer and the places that
+are a straight trade, with a per-person score on every card, so you can see who is being asked to concede.
+
+### What the agent does
+
+1. Resolves every taste signal into a Qloo entity, dropping and reporting anything it cannot match.
+2. Ranks places once per person, in the same city, with the same filters — never once for the group.
+3. Computes the group score and buckets every place into *everyone / most / one person's pick*.
+4. Revises when the answer is nothing, one constraint at a time, and records the decision and its reason.
+5. Shows its receipts: every call, its arguments, its latency and whether it was served from cache.
+
+### What makes it Qloo-powered
+
+| Capability | Dependency |
 | --- | --- |
-| 1. Short product problem statement | [Problem](#1-problem) |
-| 2. Qloo workflow or MCP tools used, and why they fit | [Qloo usage](#2-qloo-usage) |
-| 3. Redacted request→result explanation, including entity/tag choices | [Evidence](#3-requestresult-explanation) |
-| 4. Short demo or screenshots with no credential or personal data | [Demo](#4-demo) |
-| 5. Setup steps from a clean environment | [Setup](#5-setup-from-a-clean-environment) |
-| 6. Known limitations, including what the result does not establish | [Limitations](#6-known-limitations) |
+| Turning "Fela Kuti" or "Aesop" into a usable signal | `qloo api search` |
+| Ranking a city's restaurants against one person's taste | `qloo api insights` |
+| A measured per-place number, per person | `affinity` on each returned entity |
+| Explaining *why* a place fits | nested `tags` on each returned entity |
+
+An LLM can invent a plausible restaurant. It cannot rank real venues in a named city by five specific people's
+cross-domain taste and report a measured affinity for each. Remove Qloo and there is no product: there is no way to
+know what any of these people like, beyond the model's guess.
+
+### Why this is a business, not a demo
+
+Group dining is the highest-value segment of reservations — a table of five is worth several covers, and the
+decision is socially costly, so people fall back to the same three places. The agent converts a group chat argument
+into a ranked answer with evidence, and the natural product is a booking surface for exactly the party size that
+restaurants most want to fill.
 
 ---
 
-## 1. Problem
-
-Two people want to go out, and they want different things. Every recommender answers for one person; every "group
-mode" averages the group. Averaging is the wrong operation, because it lets a place one person merely tolerates
-outrank a place both people like.
-
-Duet makes the opposite bet: **a place has to win twice.** Qloo ranks the same real restaurants separately for each
-person, from each person's own cross-domain taste, and Duet keeps only the places that survive both rankings — plus
-an explicit, labeled list of the places that are a straight trade.
-
-## 2. Qloo usage
-
-Only kit-supported surfaces (`qloo api`), and only two commands:
-
-```
-qloo api search   --query "<name>" --type <domain> --take 1 --json
-qloo api insights --type restaurant --signal-entities <ids> --filter-location "<city>" --take 30 --json
-```
-
-Why these fit the problem:
-
-- **`search`** turns a human input ("Fela Kuti", "Aesop", "Severance") into an entity ID. That resolution step is
-  what lets the product accept taste from *any* domain, not just restaurants. Cross-domain input is the reason this
-  product needs Qloo at all.
-- **`insights` with `filter.type = urn:entity:place`** answers exactly the product question: given this person's
-  signals, which restaurants in this city rank highest. Running it twice, once per person, is the core mechanism.
-  The alternative — one call with combined signals — collapses two people into one, which is what we are trying to
-  stop doing.
-- **`filter.location.query`** keeps both rankings scoped to the same city, so the two lists are comparable.
-- **`fields`/`affinity`/`tags`** supply both the number and the explanation. The app shows the affinity when Qloo
-  returns one, and says so in the run log when it falls back to rank position.
-
-Deliberately **not** used: demographics and audience signals (the product must not infer identity), `qloo exec` and
-`qloo mcp` (two deterministic `api` calls are sufficient and easier to attribute), and any bulk retrieval.
-
-A duet costs **2 search + 2 insights**. Search is cached by `(type, name)` and rankings by `(signals, city, take)`
-for 30 minutes, so repeat demos cost nothing against the event quota.
-
-## 3. Request→result explanation
-
-```bash
-# Step 1 — resolve each taste signal (2 calls per duet, cached)
-qloo api search --query "Fela Kuti" --type music --take 1 --json
-  → entity_id: <redacted id>, name: "Fela Kuti"
-
-# Step 2 — rank restaurants twice, same city (2 calls per duet)
-qloo api insights --type restaurant \
-  --signal-entities <id-a1>,<id-a2>,<id-a3> \
-  --filter-location "Brooklyn, NY" --take 30 --json
-  → 30 places, each with name, entity_id, popularity, tags[]
-    and affinity where the response provides it
-
-# Step 3 — local, no Qloo call
-join both lists by entity_id
-score each place per person, combine with a harmonic mean, bucket the result
-build each person's tag vocabulary from the tags on their own top places
-```
-
-Entity/tag choices:
-
-- Signals are chosen by the user from Qloo's own search results, so no entity ID is ever hand-written or hardcoded.
-- Tags are never requested separately. They arrive nested on the returned places and are used only to describe the
-  taste vocabulary that the returned places already imply. No tag is assigned by the app.
-- Nothing about a real person is sent. Signals are public entities; the only other input is a city string.
-
-⚠️ **To fill in after the live run:** the date, the real returned entity IDs, the number of places that carried an
-`affinity` value, and the actual top-3 results for one named profile pair.
-
-## 4. Demo
-
-- ⚠️ Live URL: `https://<service>.onrender.com/?preset=crate-digger&run=1`
-- ⚠️ Video: `<2-minute walkthrough>`
-- Screenshots in-repo: [`docs/screenshots/duet-setup.png`](screenshots/duet-setup.png),
-  [`docs/screenshots/duet-result.png`](screenshots/duet-result.png)
-
-Both screenshots were captured in **sample mode** and carry a visible "Sample data" badge. They must stay labeled
-that way unless they are re-captured against live Qloo.
-
-Suggested 90-second recording:
-
-1. `0:00` The claim: "every app answers for one person; this one answers for two."
-2. `0:10` Pick the starter duo, hit **Find the overlap**.
-3. `0:20` The verdict and the overlap number, with the honest sentence underneath.
-4. `0:35` Scroll the "Both of you" group. Point at the two bars on one card — who is conceding.
-5. `0:55` The taste vocabulary: what they share vs. what only each one likes.
-6. `1:10` Open **Qloo calls** — the receipts: two searches, two insights, nothing hidden.
-7. `1:25` Switch the city, run again, show the answer changing.
-
-## 5. Setup from a clean environment
+## Setup from a clean environment
 
 ```bash
 git clone https://github.com/zalkabsi/palateops && cd palateops
-node --version          # must be >= 22.19.0 (Qloo Harness requirement)
+node --version        # must be >= 22.19.0 (Qloo Harness requirement)
 npm install
-npm test                # 53 tests, no network required
-npm start               # http://localhost:8080 (sample mode)
+npm test              # 70 tests, no network required
+npm start             # http://localhost:8080 (sample mode)
 ```
 
 Live mode:
 
 ```bash
-QLOO_API_KEY=<event credential> npm run check:qloo   # proves key + harness + response shape
-QLOO_API_KEY=<event credential> npm start            # UI loses the "Sample data" badge
+QLOO_API_KEY=<event credential> npm run check:qloo
+QLOO_API_KEY=<event credential> npm start
 ```
 
-Docker / Render: `docker build -t duet . && docker run -p 8080:8080 -e QLOO_API_KEY=... duet`, or push and use the
-included `render.yaml` blueprint.
-
-No build step, no database, no accounts, one dependency.
-
-## 6. Known limitations
-
-- **What the result does not establish.** Qloo affinities are aggregate cultural signals. A high joint score is not
-  a prediction that either person will enjoy the evening, and it is not evidence about anyone's identity.
-- **Two people only.** Three-way compromise is a genuinely different problem and is not attempted.
-- **Restaurants only.** The entity type is a constant, not a setting.
-- **Comparability assumption.** The harmonic mean treats each person's affinity scale as comparable. If Qloo
-  normalises affinity per request, this assumption needs re-examination — flagged, not hidden.
-- **Top-30 truncation.** A place just outside one person's top 30 is scored as a miss. The UI distinguishes "absent"
-  from "disliked" in the run log, but the joint score does not.
-- **Venue sanity is not checked.** The app shows what Qloo returns; it does not verify hours, price, closure, or
-  whether the place still exists.
-- **City is free text.** A misspelling produces empty or distant results with no fuzzy correction.
-- **Sample mode exists.** Without a credential the app runs on invented venues and says so in a permanent banner. It
-  is impossible to mistake sample output for Qloo output, which is deliberate.
+**The event key only works on `https://hackathon.api.qloo.com`.** Any other host returns 401. The app defaults to
+the hackathon host, so setting the key alone is enough.
 
 ---
 
-# Devpost form answers
+## Evidence to paste after the live run
 
-**Tagline**
-> Two people. One honest answer.
+Run this once the key arrives and paste the output (it prints no secret):
 
-**Inspiration**
-> Every recommender answers "what do you want". Nobody has built the thing people actually do every week: two
-> people who want different things, trying to agree. Group recommenders average the group, and averaging lets a
-> place one person barely tolerates beat a place you both like.
+```
+npm run check:qloo
+```
 
-**What it does**
-> Duet takes what two people genuinely love — an artist, a film, a brand, a book — and asks Qloo to rank the same
-> real restaurants separately for each of them. It keeps only the places that rank highly for both, shows the
-> places that are a straight trade, and names the taste vocabulary they share and don't. Every result shows both
-> scores, the tags behind them, and the exact Qloo calls that produced it.
+It reports:
 
-**How we built it**
-> A Node 22 service that calls the official Qloo Harness (`qloo api search` and `qloo api insights`) through a
-> defensive wrapper, with a pure scoring module that joins the two rankings using a harmonic mean. The front end is
-> one page of vanilla JavaScript. The verdict is written deterministically and optionally sharpened by an
-> OpenAI-compatible model that receives computed evidence only — it never sees the Qloo key and never computes a
-> score. Qloo's credential stays in the server process; the browser never sees it. Requests are cached for 30
-> minutes so a repeated demo spends no event quota.
+| Field | Expected | Actual |
+| --- | --- | --- |
+| Harness version | `>= 0.1.26` | ⚠️ |
+| Credential accepted on hackathon host | yes | ⚠️ |
+| Venues returned for a named signal + city | `> 0` | ⚠️ |
+| Places carrying an `affinity` value | ideally all | ⚠️ |
+| Places carrying `tags` | ideally all | ⚠️ |
 
-**Challenges**
-> Qloo ranks for one profile, so "which place works for both" had to be built rather than called. The obvious
-> approach — combine both people's signals into one request — is exactly what we were trying to avoid, because it
-> averages away the conflict that makes the problem interesting. Joining two independent rankings means confronting
-> incomparable scales, missing places, and the temptation to manufacture agreement. We chose a rule that can say
-> "you are opposites here" and let the product lose that argument.
+If `affinity` is missing, the app falls back to rank position. That still works, but the submission description
+must say so — it is a different claim.
 
-**Accomplishments**
-> A recommender whose headline number can be zero. Side-by-side scores on every result, so the concession is
-> visible. A taste-vocabulary comparison derived from Qloo's own tags without spending a third request. A run log
-> that shows every call, including the cached ones. And an honest sample mode: it is impossible to mistake demo
-> data for a Qloo response.
-
-**What we learned**
-> The interesting question is not "what should I do" but "what should *we* do", and it cannot be answered by
-> blending two people into one average. A compromise engine has to be willing to report that there is barely any
-> overlap, which is a worse demo and a better product.
-
-**What's next**
-> Three people. Non-restaurant entity types. Verified venue data. And the live validation run that turns the sample
-> banner off.
+⚠️ Then capture one live run per starter group and link the demo URL with `?preset=<id>&run=1`.
 
 ---
 
-# Pre-submission checklist
+## Pre-submission checklist
 
-- [ ] `npm run check:qloo` passes with the event credential
-- [ ] Screenshots re-captured in live mode, or kept with the sample badge
-- [ ] Live URL deployed and reachable; `mode: "live"` in `/api/health`
-- [ ] Repository is **public** and shows the MIT license
-- [ ] ⚠️ Confirm the public repo URL (`zalkabsi/palateops` vs the older `palateops-qloo`)
-- [ ] 90-second video recorded and uploaded
-- [ ] Devpost form fields pasted from the section above
-- [ ] Contact details and team size completed
+- [ ] API key requested via the form — **provisioning takes a few business days, request it first**
+- [ ] `npm run check:qloo` passes; output pasted above
+- [ ] Live URL deployed; `/api/health` reports `mode: "live"` and the hackathon base URL
+- [ ] Demo URL uses a deep link so a judge lands on a completed run
+- [ ] Repository public, MIT license visible in the About section
+- [ ] Description pasted into Devpost
+- [ ] Screenshots replaced or kept with the visible "Sample data" badge
 - [ ] Deadline: **30 October 2026, 11:45pm ET**
+- [ ] If shortlisted: availability to appear on air with Jason Calacanis, Cedric the Entertainer and Alex Elias on
+      **5 November**
+
+---
+
+## Risks
+
+| Risk | Impact | Mitigation |
+| --- | --- | --- |
+| Key arrives after the deadline | No live demo → ineligible | Request immediately; ask in Discord `#api-help` for expedited provisioning |
+| `affinity` absent on place insights | Scores fall back to rank; claim weakens | `check:qloo` reveals it early; description is written to survive it |
+| Render free tier cold start | Judge sees a slow first load | Paid instance for the judging window |
+| Qloo data thin in a chosen city | Empty or distant results | Every preset uses a major city; the UI reports empty explicitly |

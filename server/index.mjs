@@ -1,5 +1,5 @@
 /**
- * Duet HTTP server.
+ * PalateOps HTTP server.
  *
  * One process, no framework: static assets plus four JSON endpoints. The Qloo
  * credential lives only here, never in the browser bundle.
@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 import { createCache } from "./cache.mjs";
 import { createDataSource } from "./dataSource.mjs";
 import { resolveModel } from "./model.mjs";
-import { DuetInputError, parseDuetInput, runDuet } from "./agent.mjs";
+import { PlanInputError, parsePlanInput, runPlan } from "./agent.mjs";
 import { PRESETS } from "./presets.mjs";
 import { TASTE_TYPES } from "./qloo.mjs";
 
@@ -47,15 +47,15 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
       if (path === "/api/health") return await health(response);
       if (path === "/api/presets") return sendJson(response, 200, { presets: PRESETS, tasteTypes: TASTE_TYPES });
       if (path === "/api/search") return await search(request, response, url);
-      if (path === "/api/duet") return await duet(request, response);
+      if (path === "/api/plan") return await plan(request, response);
       if (path.startsWith("/api/")) return sendJson(response, 404, { error: "Unknown endpoint." });
       return serveStatic(request, response, path);
     } catch (error) {
-      const status = error instanceof DuetInputError ? 400 : Number(error?.status) || 500;
+      const status = error instanceof PlanInputError ? 400 : Number(error?.status) || 500;
       const message = status >= 500
-        ? (error?.name === "QlooError" ? error.message : "The duet could not be completed. Try again.")
+        ? (error?.name === "QlooError" ? error.message : "The agent could not finish. Try again.")
         : error.message;
-      if (status >= 500) console.error("[duet]", error?.code ?? "", error?.message ?? error);
+      if (status >= 500) console.error("[palateops]", error?.code ?? "", error?.message ?? error);
       return sendJson(response, status, { error: message, code: error?.code ?? "ERROR" });
     }
   }
@@ -65,6 +65,7 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
       status: "ok",
       mode: data.mode,
       qlooConfigured: data.live,
+      qlooBaseUrl: data.baseUrl,
       modelConfigured: model.configured,
       harnessVersion: await data.version(),
       tasteTypes: TASTE_TYPES,
@@ -83,16 +84,16 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
     return sendJson(response, 200, { mode: data.mode, results });
   }
 
-  async function duet(request, response) {
+  async function plan(request, response) {
     if (request.method !== "POST") return sendJson(response, 405, { error: "Use POST." });
-    const limit = limiter.allow(`duet:${clientIp(request)}`, 12);
+    const limit = limiter.allow(`plan:${clientIp(request)}`, 12);
     if (!limit.ok) return tooMany(response, limit.retryAfter);
     if (!String(request.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
       return sendJson(response, 415, { error: "Send application/json." });
     }
     const body = await readJsonBody(request);
-    const input = parseDuetInput(body);
-    const result = await runDuet({ input, data, cache, model });
+    const input = parsePlanInput(body);
+    const result = await runPlan({ input, data, cache, model });
     return sendJson(response, 200, result);
   }
 
@@ -101,14 +102,14 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
     let size = 0;
     for await (const chunk of request) {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) throw new DuetInputError("That request is too large.");
+      if (size > MAX_BODY_BYTES) throw new PlanInputError("That request is too large.");
       chunks.push(chunk);
     }
-    if (size === 0) throw new DuetInputError("Send a JSON body.");
+    if (size === 0) throw new PlanInputError("Send a JSON body.");
     try {
       return JSON.parse(Buffer.concat(chunks).toString("utf8"));
     } catch {
-      throw new DuetInputError("That body is not valid JSON.");
+      throw new PlanInputError("That body is not valid JSON.");
     }
   }
 
@@ -201,9 +202,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const server = createServer(app.handle);
   server.listen(PORT, HOST, () => {
     const target = `http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`;
-    console.log(`[duet] listening on ${target}`);
-    console.log(`[duet] mode: ${app.data.mode}${app.data.live ? "" : " (no QLOO_API_KEY - fixture data)"}`);
-    console.log(`[duet] verdict writer: ${app.model.configured ? app.model.provider : "deterministic"}`);
+    console.log(`[palateops] listening on ${target}`);
+    console.log(`[palateops] mode: ${app.data.mode}${app.data.live ? " -> " + app.data.baseUrl : " (no QLOO_API_KEY - fixture data)"}`);
+    console.log(`[palateops] verdict writer: ${app.model.configured ? app.model.provider : "deterministic"}`);
   });
   const shutdown = () => server.close(() => process.exit(0));
   process.on("SIGTERM", shutdown);

@@ -1,20 +1,24 @@
 services:
   - type: web
-    name: duet
+    name: palateops
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
-      # Set these in the Render dashboard. They are never committed.
+      # Set the key in the Render dashboard. It is never committed.
       - key: QLOO_API_KEY
         sync: false
+      # Event keys only work on this host. Set explicitly so the deployed
+      # environment is self-documenting.
+      - key: QLOO_BASE_URL
+        value: https://hackathon.api.qloo.com
+      - key: QLOO_TRUSTED_BASE_URL
+        value: https://hackathon.api.qloo.com
       - key: LLM_API_KEY
         sync: false
       - key: LLM_MODEL
         sync: false
       - key: LLM_BASE_URL
         sync: false
-      - key: DUET_MODE
-        value: live

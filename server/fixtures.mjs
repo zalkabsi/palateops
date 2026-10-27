@@ -116,7 +116,16 @@ export function fixtureSearch({ query, type, take = 8 }) {
   }));
 }
 
-export function fixtureRecommendPlaces({ signals, city, take = 30 }) {
+/** Deterministic price band so constraint relaxation is observable in fixtures. */
+function priceLevelFor(tags) {
+  const premium = ["omakase", "seafood", "sake", "korean bbq", "martini"];
+  const mid = ["handmade pasta", "wood-fired", "tapas", "natural wine", "rooftop"];
+  if (tags.some((tag) => premium.includes(tag))) return 4;
+  if (tags.some((tag) => mid.includes(tag))) return 3;
+  return 2;
+}
+
+export function fixtureRecommendPlaces({ signals, city, take = 30, maxPriceLevel = null }) {
   const profile = (Array.isArray(signals) ? signals : []).map((signal) =>
     typeof signal === "string"
       ? { name: signal, type: "music" }
@@ -129,32 +138,35 @@ export function fixtureRecommendPlaces({ signals, city, take = 30 }) {
   const rawScores = VENUES.map(([name, tags]) => {
     let matched = 0;
     for (const tag of tags) matched += flavor.get(tag) ?? 0;
-    return { name, tags, matched: matched / Math.max(1, tags.length) };
+    return { name, tags, matched: matched / Math.max(1, tags.length), priceLevel: priceLevelFor(tags) };
   });
   const peak = Math.max(0.001, ...rawScores.map((entry) => entry.matched));
 
-  const scored = rawScores.map(({ name, tags, matched }) => {
-    const popularity = VENUES.find(([venueName]) => venueName === name)?.[2] ?? 0.6;
-    const random = prng(hash(name) ^ cityJitter ^ hash(profile.map((signal) => signal.name).join("|")));
-    const jitter = (random() - 0.5) * 0.1;
-    const value = 0.12 + (matched / peak) * 0.74 + (popularity - 0.6) * 0.16 + jitter;
-    return {
-      id: `fixture-place-${hash(name).toString(16)}`,
-      name,
-      subtype: "urn:entity:place",
-      popularity,
-      affinity: Math.min(0.97, Math.max(0.02, value)),
-      address: city || "",
-      tags: tags.map((tag) => ({
-        id: `urn:tag:keyword:place:${hash(tag).toString(16)}`,
-        name: tag,
-        type: "urn:tag:keyword:place",
-      })),
-    };
-  });
+  const scored = rawScores
+    .filter((entry) => !Number.isInteger(maxPriceLevel) || entry.priceLevel <= maxPriceLevel)
+    .map(({ name, tags, matched, priceLevel }) => {
+      const popularity = VENUES.find(([venueName]) => venueName === name)?.[2] ?? 0.6;
+      const random = prng(hash(name) ^ cityJitter ^ hash(profile.map((signal) => signal.name).join("|")));
+      const jitter = (random() - 0.5) * 0.1;
+      const value = 0.12 + (matched / peak) * 0.74 + (popularity - 0.6) * 0.16 + jitter;
+      return {
+        id: `fixture-place-${hash(name).toString(16)}`,
+        name,
+        subtype: "urn:entity:place",
+        popularity,
+        priceLevel,
+        affinity: Math.min(0.97, Math.max(0.02, value)),
+        address: city || "",
+        tags: tags.map((tag) => ({
+          id: `urn:tag:keyword:place:${hash(tag).toString(16)}`,
+          name: tag,
+          type: "urn:tag:keyword:place",
+        })),
+      };
+    });
 
   scored.sort((left, right) => right.affinity - left.affinity || left.name.localeCompare(right.name));
-  // Each person sees a different slice, exactly as two independent Qloo
-  // rankings would: overlap is the exception, not the default.
+  // Each person sees a different slice, exactly as independent Qloo rankings
+  // would: overlap is the exception, not the default.
   return scored.slice(0, Math.min(take, 18));
 }

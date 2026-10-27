@@ -1,4 +1,4 @@
-/* Duet — one page, one decision. */
+/* PalateOps — one page, one decision. */
 
 :root {
   color-scheme: light;
@@ -74,6 +74,7 @@ em { font-style: italic; }
 .brand-mark span { width: 4px; border-radius: 3px; background: var(--lime); }
 .brand-mark span:nth-child(1) { height: 9px; opacity: 0.7; }
 .brand-mark span:nth-child(2) { height: 16px; }
+.brand-mark span:nth-child(3) { height: 11px; opacity: 0.85; }
 .brand-name {
   font-family: var(--display); font-size: 21px; letter-spacing: -0.2px; line-height: 1;
 }
@@ -161,14 +162,29 @@ em { font-style: italic; }
 .preset small { font-size: 10.5px; color: var(--muted); }
 .preset[aria-pressed="true"] small { color: #b9cbb8; }
 
-.pair { display: grid; grid-template-columns: 1fr 44px 1fr; align-items: stretch; }
-
-.pair-seam { display: grid; place-items: center; }
-.pair-seam span {
-  writing-mode: vertical-rl;
-  font-size: 9.5px; letter-spacing: 2px; text-transform: uppercase;
-  color: var(--muted);
+.people {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 12px;
 }
+
+.add-person {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-top: 12px; padding: 9px 16px;
+  border: 1px dashed var(--line-strong); border-radius: 10px;
+  background: transparent; color: var(--muted); font-size: 12.5px;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.add-person:hover { border-color: var(--green-3); color: var(--green-2); background: rgba(44, 99, 80, 0.04); }
+.add-person span { font-size: 15px; line-height: 1; }
+
+.remove-person {
+  margin-left: auto; flex: none;
+  width: 24px; height: 24px; display: grid; place-items: center;
+  border: 1px solid transparent; border-radius: 50%;
+  background: transparent; color: var(--muted); font-size: 17px; line-height: 1;
+}
+.remove-person:hover { border-color: #e9d3c7; background: #fbf0ea; color: var(--clay); }
 
 .person {
   display: flex; flex-direction: column; gap: 14px;
@@ -256,11 +272,21 @@ em { font-style: italic; }
   margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line);
 }
 
-.city-field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 200px; }
-.city-field span { font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.city-field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 180px; }
+.city-field span, .price-field span { font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
 .city-field input {
   padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 11px;
   background: #fff; font-size: 14px;
+}
+
+.price-field { display: flex; flex-direction: column; gap: 6px; min-width: 148px; }
+.price-field select {
+  padding: 12px 12px; border: 1px solid var(--line-strong); border-radius: 11px;
+  background: #fff; font-size: 13px; appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 55%, calc(100% - 13px) 55%;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat;
 }
 
 .primary {
@@ -337,7 +363,9 @@ em { font-style: italic; }
 /* taste vocabulary */
 
 .taste {
-  display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 18px;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
   margin-top: 18px;
 }
 .taste-col {
@@ -354,9 +382,25 @@ em { font-style: italic; }
   padding: 3px 9px; border-radius: 999px; font-size: 11.5px;
   background: #eef1e3; border: 1px solid #dde2cb; color: var(--ink-soft);
 }
-.taste-col[data-kind="a"] .tag { background: #f6ece6; border-color: #e9d3c7; }
-.taste-col[data-kind="b"] .tag { background: #e9f0ee; border-color: #cfe0da; }
+.taste-col[data-kind="individual"] .tag { background: #e9f0ee; border-color: #cfe0da; }
 .tag-empty { font-size: 12px; color: var(--muted); font-style: italic; }
+
+/* negotiation: what the agent gave up */
+
+.negotiation {
+  margin-bottom: 18px; padding: 16px 20px;
+  border: 1px solid #e6d6ae; border-left: 3px solid var(--amber);
+  border-radius: 12px; background: #fdf8ec;
+}
+.negotiation-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.3px; text-transform: uppercase;
+  color: #8a6316; margin-bottom: 7px;
+}
+.negotiation-lead { font-size: 13.5px; color: #5c4b23; line-height: 1.55; }
+.negotiation-list { margin-top: 10px; display: grid; gap: 5px; }
+.negotiation-list li { font-size: 12px; color: #6d5a2c; padding-left: 14px; position: relative; line-height: 1.5; }
+.negotiation-list li::before { content: "→"; position: absolute; left: 0; color: var(--amber); }
+.negotiation-list strong { font-weight: 600; color: #4d3f1c; }
 
 /* venue groups */
 
@@ -394,6 +438,7 @@ em { font-style: italic; }
 }
 .venue[data-bucket="both"] .venue-joint { background: var(--green); color: var(--lime); }
 .venue-addr { font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+.venue-price { font-size: 11px; color: var(--green-3); letter-spacing: 1px; }
 
 .bars { display: grid; gap: 5px; margin-top: 12px; }
 .bar-row { display: grid; grid-template-columns: 58px 1fr 34px; align-items: center; gap: 9px; }
@@ -468,9 +513,8 @@ em { font-style: italic; }
 /* ---------- responsive ---------- */
 
 @media (max-width: 940px) {
-  .pair { grid-template-columns: 1fr; gap: 12px; }
-  .pair-seam { display: none; }
-  .taste { grid-template-columns: 1fr; }
+  .people { grid-template-columns: 1fr; }
+  .taste { grid-template-columns: 1fr 1fr; }
   .receipt { grid-template-columns: 1fr; }
   .verdict { grid-template-columns: 1fr; gap: 20px; }
   .overlap { align-items: flex-start; }
@@ -478,6 +522,7 @@ em { font-style: italic; }
 }
 
 @media (max-width: 620px) {
+  .taste { grid-template-columns: 1fr; }
   .topbar-note { display: none; }
   .hero h1 { font-size: clamp(34px, 11vw, 46px); }
   .venues { grid-template-columns: 1fr; }

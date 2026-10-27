@@ -124,6 +124,7 @@ must say so — it is a different claim.
 - [ ] Demo URL uses a deep link so a judge lands on a completed run
 - [ ] Repository public, MIT license visible in the About section
 - [ ] Description pasted into Devpost
+- [ ] Thumbnail uploaded — `docs/thumbnail.png` (1200x800, 3:2, 100 KB; alternate in `docs/thumbnail-minimal.png`)
 - [ ] Screenshots replaced or kept with the visible "Sample data" badge
 - [ ] Deadline: **30 October 2026, 11:45pm ET**
 - [ ] If shortlisted: availability to appear on air with Jason Calacanis, Cedric the Entertainer and Alex Elias on

@@ -177,3 +177,40 @@ describe("cache", () => {
     assert.equal(cache.get("b"), undefined);
   });
 });
+
+describe("liveness probe", () => {
+  // Regression: /api/health used to await the harness version probe, which
+  // spawns a Node subprocess. In fixture mode that was skipped, so the bug only
+  // appeared once a real key was configured - and it failed the Render deploy
+  // health check for 15 minutes while the app itself was running fine.
+  it("answers even when the harness probe never returns", async () => {
+    const hanging = {
+      mode: "live",
+      live: true,
+      baseUrl: "https://hackathon.api.qloo.com",
+      version: () => new Promise(() => {}),
+      search: async () => [],
+      recommend: async () => [],
+    };
+    const app = createApp({}, { dataSource: hanging });
+    const probe = createServer(app.handle);
+    await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
+    const port = probe.address().port;
+
+    try {
+      const started = Date.now();
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(2000) });
+      const body = await response.json();
+      const elapsed = Date.now() - started;
+
+      assert.equal(response.status, 200);
+      assert.equal(body.mode, "live");
+      assert.equal(body.qlooConfigured, true);
+      assert.equal(body.harnessVersion, undefined, "health must not report a probed version");
+      assert.equal(body.harnessProbe, "/api/diagnose");
+      assert.ok(elapsed < 1000, `health took ${elapsed}ms, expected it to return immediately`);
+    } finally {
+      await new Promise((resolve) => probe.close(resolve));
+    }
+  });
+});

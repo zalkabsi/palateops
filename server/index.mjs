@@ -33,8 +33,8 @@ const CONTENT_TYPES = {
   ".json": "application/json; charset=utf-8",
 };
 
-export function createApp(env = process.env, { now = () => Date.now() } = {}) {
-  const data = createDataSource(env);
+export function createApp(env = process.env, { now = () => Date.now(), dataSource = null } = {}) {
+  const data = dataSource ?? createDataSource(env);
   const model = resolveModel(env);
   const cache = createCache({ now });
   const limiter = createRateLimiter({ now });
@@ -45,6 +45,11 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
 
     try {
       if (path === "/api/health") return await health(response);
+      if (path === "/api/diagnose") {
+        const limit = limiter.allow(`diagnose:${clientIp(request)}`, 6);
+        if (!limit.ok) return tooMany(response, limit.retryAfter);
+        return await diagnose(response);
+      }
       if (path === "/api/presets") return sendJson(response, 200, { presets: PRESETS, tasteTypes: TASTE_TYPES });
       if (path === "/api/search") return await search(request, response, url);
       if (path === "/api/plan") return await plan(request, response);
@@ -60,6 +65,11 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
     }
   }
 
+  /**
+   * Liveness probe. This must never spawn a subprocess or touch the network:
+   * Render polls it during deploy, and a slow answer fails the deploy rather
+   * than the request. The harness probe lives on /api/diagnose instead.
+   */
   async function health(response) {
     return sendJson(response, 200, {
       status: "ok",
@@ -70,8 +80,19 @@ export function createApp(env = process.env, { now = () => Date.now() } = {}) {
       qlooConfigured: data.live,
       qlooBaseUrl: data.baseUrl,
       modelConfigured: model.configured,
-      harnessVersion: await data.version(),
+      harnessProbe: "/api/diagnose",
       tasteTypes: TASTE_TYPES,
+    });
+  }
+
+  /** Slow, explicit probe. Only ever called by a human or `npm run check:qloo`. */
+  async function diagnose(response) {
+    return sendJson(response, 200, {
+      status: "ok",
+      build: String(env.RENDER_GIT_COMMIT ?? "").slice(0, 7) || "dev",
+      mode: data.mode,
+      qlooBaseUrl: data.baseUrl,
+      harnessVersion: await data.version(),
     });
   }
 

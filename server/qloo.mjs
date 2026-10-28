@@ -29,6 +29,15 @@ export const DEFAULT_VENUE_LIMIT = 30;
  */
 export const HACKATHON_BASE_URL = "https://hackathon.api.qloo.com";
 
+/**
+ * `--type restaurant` maps to urn:entity:place, which is EVERY point of
+ * interest: parks, tattoo studios, a stock exchange. The event docs show the
+ * genre taxonomy as urn:tag:genre:place:restaurant[:cuisine], so the parent tag
+ * is what makes the results edible. Invalid params are silently ignored by the
+ * API, so this is verified from the results, not from an error.
+ */
+export const RESTAURANT_GENRE = "urn:tag:genre:place:restaurant";
+
 const DEFAULT_TIMEOUT_MS = 25_000;
 // The guide states field filtering is not supported, so insights responses are
 // verbose. Allow generous headroom rather than truncating a valid payload.
@@ -287,10 +296,12 @@ export async function recommendPlaces({ signals, city, take = DEFAULT_VENUE_LIMI
     "--json",
   ];
   if (safeCity) args.push("--filter-location", safeCity);
-  // The CLI has no price flag, but `--params` merges raw documented parameters.
+  // The CLI has no flags for these, but `--params` merges documented parameters.
+  const params = { "filter.tags": RESTAURANT_GENRE };
   if (Number.isInteger(maxPriceLevel) && maxPriceLevel >= 1 && maxPriceLevel <= 4) {
-    args.push("--params", JSON.stringify({ "filter.price_level.max": maxPriceLevel }));
+    params["filter.price_level.max"] = maxPriceLevel;
   }
+  args.push("--params", JSON.stringify(params));
   const payload = await runHarness(args, options);
   return extractEntities(payload)
     .map((entity) => normalizeEntity(entity))

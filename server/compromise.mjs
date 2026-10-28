@@ -95,7 +95,8 @@ export function joinCandidates(lists) {
       joint,
       present,
       of: lists.length,
-      affinitySource: venue.sources.every((source) => source === "qloo") ? "qloo" : "rank",
+      affinitySource: venue.sources.some((source) => source === "qloo") ? "qloo" : "rank",
+      sources: venue.sources,
       tags: venue.tags,
       bucket: bucketFor(venue.scores, joint),
     };

@@ -117,11 +117,11 @@ export async function runPlan({ input, data, cache, model = null }) {
   };
 
   // ---- 1. resolve every person's taste into Qloo entities ------------------
-  const resolvedPeople = [];
-  for (const person of input.people) {
-    const resolved = [];
-    for (const signal of person.signals) {
-      if (signal.id) { resolved.push({ ...signal }); continue; }
+  // Every resolution is independent, so they all go out at once: on a small
+  // instance the wall clock is dominated by waiting on subprocesses in series.
+  const resolvedPeople = await Promise.all(input.people.map(async (person) => {
+    const settled = await Promise.all(person.signals.map(async (signal) => {
+      if (signal.id) return { ...signal };
       const key = cacheKey("resolve", signal.type, signal.name);
       const found = await step("search", `Resolve "${signal.name}" for ${person.label}`, async () => {
         const { value, hit } = await cache.wrap(key, async () => data.search({ query: signal.name, type: signal.type, take: 1 }));
@@ -131,15 +131,16 @@ export async function runPlan({ input, data, cache, model = null }) {
       const entity = Array.isArray(found) ? found[0] : null;
       if (!entity?.id) {
         trace.push({ tool: "search", label: `No Qloo match for "${signal.name}"`, ok: false, ms: 0, detail: "skipped" });
-        continue;
+        return null;
       }
-      resolved.push({ name: entity.name, type: signal.type, id: entity.id, resolvedFrom: signal.name });
-    }
+      return { name: entity.name, type: signal.type, id: entity.id, resolvedFrom: signal.name };
+    }));
+    const resolved = settled.filter(Boolean);
     if (resolved.length === 0) {
       throw new PlanInputError(`None of ${person.label}'s signals could be matched to a Qloo entity. Try different names.`);
     }
-    resolvedPeople.push({ label: person.label, signals: resolved });
-  }
+    return { label: person.label, signals: resolved };
+  }));
 
   // ---- 2. plan / act / observe, relaxing until somebody can win -----------
   const initialConstraints = { ...input.constraints };
@@ -148,8 +149,7 @@ export async function runPlan({ input, data, cache, model = null }) {
 
   let lastLengths = [];
   const rankEveryone = async (active) => {
-    const lists = [];
-    for (const person of resolvedPeople) {
+    const settled = await Promise.all(resolvedPeople.map(async (person) => {
       const ids = person.signals.map((signal) => signal.id).sort();
       const key = cacheKey("places", ids, input.city, active.take, active.maxPriceLevel ?? "any");
       const places = await step(
@@ -170,8 +170,9 @@ export async function runPlan({ input, data, cache, model = null }) {
           return value;
         },
       );
-      lists.push({ label: person.label, entities: places });
-    }
+      return { label: person.label, entities: places };
+    }));
+    const lists = settled;
     lastLengths = lists.map((list) => list.entities.length);
     return joinCandidates(lists);
   };

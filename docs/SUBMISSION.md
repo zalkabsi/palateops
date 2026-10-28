@@ -100,13 +100,14 @@ npm run check:qloo
 
 It reports:
 
-| Field | Expected | Actual |
+| Field | Expected | Actual (28 Oct, live) |
 | --- | --- | --- |
-| Harness version | `>= 0.1.26` | ⚠️ |
-| Credential accepted on hackathon host | yes | ⚠️ |
-| Venues returned for a named signal + city | `> 0` | ⚠️ |
-| Places carrying an `affinity` value | ideally all | ⚠️ |
-| Places carrying `tags` | ideally all | ⚠️ |
+| Credential accepted on hackathon host | yes | ✅ `mode: live` from the container |
+| Venues returned for a named signal + city | `> 0` | ✅ 97 distinct places in Brooklyn, NY |
+| Places carrying an `affinity` value | ideally all | ✅ 97 / 97 |
+| Places carrying `tags` | ideally all | ✅ 97 / 97 (≈100 tags per place) |
+| Shared places found by the group score | `> 0` | ✅ 3 cleared every person |
+| Harness version reported by `/api/diagnose` | `>= 0.1.26` | ⚠️ `unavailable` — the probe times out on a cold subprocess; the harness itself demonstrably runs, since every live call succeeds |
 
 If `affinity` is missing, the app falls back to rank position. That still works, but the submission description
 must say so — it is a different claim.

@@ -16,11 +16,35 @@ export const EVERYONE_THRESHOLD = 0.55;
 /** Above this single-person score, a one-sided place is offered as a trade. */
 export const TRADE_THRESHOLD = 0.6;
 
-/** Tags that describe what a place *is*, not how it *feels*. */
+/**
+ * Tags that describe what a place *is* or how it is *operated*, not what it
+ * feels like. Live place entities carry ~100 tags each and most are service
+ * metadata ("dine in", "nfc mobile payments", "takeout"). Left in, the shared
+ * taste panel reads as noise and the product looks like it does not understand
+ * culture at all.
+ */
 const GENERIC_TAGS = new Set([
   "restaurant", "food", "bar", "cafe", "establishment", "point of interest", "dining",
   "food and drink", "eat and drink", "lounge", "pub", "nightlife", "service",
+  "foodies", "casual dining", "casual", "urban", "historic", "stylish", "modern",
 ]);
+
+/** Service/operations tags, matched loosely because Qloo varies the wording. */
+const OPERATIONAL_TAG = /^(dine in|dine-in|takeout|take out|delivery|outdoor seating|outdoor|seating|walk.?ins?|reservations?|accepts reservations|no reservations?|nfc mobile payments|mobile payments|credit cards?|debit cards?|cash only|parking|valet|wifi|free wi-?fi|wheelchair accessible|table service|counter service|online booking|booking|group friendly|good for [a-z ]+|family friendly|kids menu|pet friendly|dress code|attire|smoking|no smoking|air conditioning|heating)$/i;
+
+/** True when a tag says something about taste rather than logistics. */
+export function isInformativeTag(name) {
+  const key = normalizeTag(name);
+  if (!key) return false;
+  if (GENERIC_TAGS.has(key)) return false;
+  return !OPERATIONAL_TAG.test(key);
+}
+
+/** Tags worth showing on a venue card: informative first, capped. */
+export function displayTags(tags, limit = 4) {
+  const kept = (tags ?? []).filter((tag) => isInformativeTag(tag?.name));
+  return kept.slice(0, limit);
+}
 
 /**
  * Convert Qloo's ranking into a normalised score in [0,1].
@@ -98,6 +122,7 @@ export function joinCandidates(lists) {
       affinitySource: venue.sources.some((source) => source === "qloo") ? "qloo" : "rank",
       sources: venue.sources,
       tags: venue.tags,
+      displayTags: displayTags(venue.tags),
       bucket: bucketFor(venue.scores, joint),
     };
   });
@@ -124,9 +149,8 @@ export function tagProfile(venues, { topN = 12 } = {}) {
     const weight = typeof venue.score === "number" ? venue.score : venue.affinity;
     if (!Number.isFinite(weight) || weight <= 0) continue;
     for (const tag of venue.tags ?? []) {
-      const key = normalizeTag(tag?.name);
-      if (!key || GENERIC_TAGS.has(key)) continue;
-      weights.set(key, (weights.get(key) ?? 0) + weight);
+      if (!isInformativeTag(tag?.name)) continue;
+      weights.set(normalizeTag(tag.name), (weights.get(normalizeTag(tag.name)) ?? 0) + weight);
     }
   }
   const peak = Math.max(0, ...weights.values());

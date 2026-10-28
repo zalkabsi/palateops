@@ -17,7 +17,7 @@ export function narrate({ summary, taste, venues, people, city, decisions = [], 
 
   const detailParts = [summary.verdict.detail];
   if (shared.length > 0) {
-    detailParts.push(`${group} all respond to ${list(shared)}.`);
+    detailParts.push(`${group} ${names.length === 2 ? "both respond" : "all respond"} to ${list(shared)}.`);
   } else if (summary.total > 0) {
     detailParts.push("Their tastes share no vocabulary, which is exactly why this is hard.");
   }

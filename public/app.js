@@ -496,7 +496,8 @@ function venueGroup(title, subtitle, venues, kind, names) {
 }
 
 function venueCard(venue, kind, names) {
-  const tags = (venue.tags ?? []).slice(0, 4).map((tag) => `<span>${esc(tag.name)}</span>`).join("");
+  const shown = venue.displayTags ?? (venue.tags ?? []).slice(0, 4);
+  const tags = shown.map((tag) => `<span>${esc(tag.name)}</span>`).join("");
   const badge = kind === "trade"
     ? ""
     : `<span class="venue-joint" title="Group score: the harmonic mean across everyone">${Math.round((venue.joint ?? 0) * 100)}</span>`;

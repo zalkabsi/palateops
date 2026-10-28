@@ -38,7 +38,7 @@ export const HACKATHON_BASE_URL = "https://hackathon.api.qloo.com";
  */
 export const RESTAURANT_GENRE = "urn:tag:genre:place:restaurant";
 
-const DEFAULT_TIMEOUT_MS = 25_000;
+const DEFAULT_TIMEOUT_MS = 45_000;
 // The guide states field filtering is not supported, so insights responses are
 // verbose. Allow generous headroom rather than truncating a valid payload.
 const MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
@@ -317,7 +317,7 @@ function clampInt(value, min, max, fallback) {
 /** Version probe used by `/api/health` and the deploy check. */
 export async function harnessVersion(options = {}) {
   try {
-    const output = await runHarness(["--version"], { ...options, timeoutMs: 8_000 });
+    const output = await runHarness(["--version"], { ...options, timeoutMs: 30_000 });
     return String(output ?? "").trim().split("\n").pop() || "unknown";
   } catch {
     return "unavailable";

@@ -36,7 +36,9 @@ const CONTENT_TYPES = {
 export function createApp(env = process.env, { now = () => Date.now(), dataSource = null } = {}) {
   const data = dataSource ?? createDataSource(env);
   const model = resolveModel(env);
-  const cache = createCache({ now });
+  // Qloo data does not change hour to hour, and a judge should not pay the
+  // cold-start cost of a preset somebody already ran.
+  const cache = createCache({ now, ttlMs: Number(env.CACHE_TTL_MS) || 24 * 60 * 60 * 1000 });
   const limiter = createRateLimiter({ now });
 
   async function handle(request, response) {

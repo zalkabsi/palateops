@@ -117,11 +117,14 @@ export async function runPlan({ input, data, cache, model = null }) {
   };
 
   // ---- 1. resolve every person's taste into Qloo entities ------------------
-  // Every resolution is independent, so they all go out at once: on a small
-  // instance the wall clock is dominated by waiting on subprocesses in series.
-  const resolvedPeople = await Promise.all(input.people.map(async (person) => {
-    const settled = await Promise.all(person.signals.map(async (signal) => {
-      if (signal.id) return { ...signal };
+  // Serial on purpose. Each call cold-starts the harness (~9s on a small
+  // instance); running them concurrently makes every one of them slower and
+  // pushes them past the per-call timeout.
+  const resolvedPeople = [];
+  for (const person of input.people) {
+    const settled = [];
+    for (const signal of person.signals) {
+      if (signal.id) { settled.push({ ...signal }); continue; }
       const key = cacheKey("resolve", signal.type, signal.name);
       const found = await step("search", `Resolve "${signal.name}" for ${person.label}`, async () => {
         const { value, hit } = await cache.wrap(key, async () => data.search({ query: signal.name, type: signal.type, take: 1 }));
@@ -131,16 +134,16 @@ export async function runPlan({ input, data, cache, model = null }) {
       const entity = Array.isArray(found) ? found[0] : null;
       if (!entity?.id) {
         trace.push({ tool: "search", label: `No Qloo match for "${signal.name}"`, ok: false, ms: 0, detail: "skipped" });
-        return null;
+        continue;
       }
-      return { name: entity.name, type: signal.type, id: entity.id, resolvedFrom: signal.name };
-    }));
+      settled.push({ name: entity.name, type: signal.type, id: entity.id, resolvedFrom: signal.name });
+    }
     const resolved = settled.filter(Boolean);
     if (resolved.length === 0) {
       throw new PlanInputError(`None of ${person.label}'s signals could be matched to a Qloo entity. Try different names.`);
     }
-    return { label: person.label, signals: resolved };
-  }));
+    resolvedPeople.push({ label: person.label, signals: resolved });
+  }
 
   // ---- 2. plan / act / observe, relaxing until somebody can win -----------
   const initialConstraints = { ...input.constraints };
@@ -149,7 +152,8 @@ export async function runPlan({ input, data, cache, model = null }) {
 
   let lastLengths = [];
   const rankEveryone = async (active) => {
-    const settled = await Promise.all(resolvedPeople.map(async (person) => {
+    const settled = [];
+    for (const person of resolvedPeople) {
       const ids = person.signals.map((signal) => signal.id).sort();
       const key = cacheKey("places", ids, input.city, active.take, active.maxPriceLevel ?? "any");
       const places = await step(
@@ -170,8 +174,8 @@ export async function runPlan({ input, data, cache, model = null }) {
           return value;
         },
       );
-      return { label: person.label, entities: places };
-    }));
+      settled.push({ label: person.label, entities: places });
+    }
     const lists = settled;
     lastLengths = lists.map((list) => list.entities.length);
     return joinCandidates(lists);

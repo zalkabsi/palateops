@@ -29,15 +29,42 @@ const GENERIC_TAGS = new Set([
   "foodies", "casual dining", "casual", "urban", "historic", "stylish", "modern",
 ]);
 
+/** Age brackets ("25 29"), audiences and bare containers: never taste. */
+const DEMOGRAPHIC_TAG = /^(\d{1,2}\s*(?:[-–]\s*)?\d{1,2}|\d{1,2} to \d{1,2}|\d{1,2} and (older|younger)|young adults|young people|locals|tourists|visitors|families|students|professionals|young professionals|millennials|gen ?z|gen ?x|boomers|seniors|adults|kids|couples|women|men|people|everyone)$/i;
+
+const CONTAINER_TAG = /^(place|places|destination|destinations|venue|venues|attraction|attractions|business|businesses|activity|activities|experience|experiences|landmark|landmarks|real estate|point of interest)$/i;
+
 /** Service/operations tags, matched loosely because Qloo varies the wording. */
-const OPERATIONAL_TAG = /^(dine in|dine-in|takeout|take out|delivery|outdoor seating|outdoor|seating|walk.?ins?|reservations?|accepts reservations|no reservations?|nfc mobile payments|mobile payments|credit cards?|debit cards?|cash only|parking|valet|wifi|free wi-?fi|wheelchair accessible|table service|counter service|online booking|booking|group friendly|good for [a-z ]+|family friendly|kids menu|pet friendly|dress code|attire|smoking|no smoking|air conditioning|heating)$/i;
+const OPERATIONAL_TAG = /(wheelchair|accessib|seating|dine.?in|take.?out|delivery|reservation|payment|parking|valet|wifi|wi-?fi|service|booking|credit card|debit card|cash only|smoking|dress code|attire|air condition|heating|pet friendly|kid|family friendly|group friendly|walk.?ins?|counter|table service|good for )/i;
 
 /** True when a tag says something about taste rather than logistics. */
 export function isInformativeTag(name) {
   const key = normalizeTag(name);
   if (!key) return false;
   if (GENERIC_TAGS.has(key)) return false;
+  if (DEMOGRAPHIC_TAG.test(key)) return false;
+  if (CONTAINER_TAG.test(key)) return false;
   return !OPERATIONAL_TAG.test(key);
+}
+
+/**
+ * Tags that appear on most venues carry no signal: a word attached to 40% of
+ * places distinguishes none of them. This is a document-frequency cut over the
+ * actual result set, which is far more durable than trying to enumerate every
+ * generic word Qloo might emit.
+ */
+export function ubiquitousTags(venues, { floor = 0.35 } = {}) {
+  const counts = new Map();
+  for (const venue of venues ?? []) {
+    for (const tag of venue.tags ?? []) {
+      if (!isInformativeTag(tag?.name)) continue;
+      const key = normalizeTag(tag.name);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  const total = Math.max(1, (venues ?? []).length);
+  const limit = Math.max(2, Math.ceil(total * floor));
+  return new Set([...counts].filter(([, seen]) => seen >= limit).map(([key]) => key));
 }
 
 /** Tags worth showing on a venue card: informative first, capped. */
@@ -143,14 +170,16 @@ function bucketFor(scores, joint) {
  * highest. Derived evidence, not a second Qloo call: it keeps a run at N
  * requests instead of 2N and stays explainable on screen.
  */
-export function tagProfile(venues, { topN = 12 } = {}) {
+export function tagProfile(venues, { topN = 12, exclude = new Set() } = {}) {
   const weights = new Map();
   for (const venue of venues.slice(0, topN)) {
     const weight = typeof venue.score === "number" ? venue.score : venue.affinity;
     if (!Number.isFinite(weight) || weight <= 0) continue;
     for (const tag of venue.tags ?? []) {
       if (!isInformativeTag(tag?.name)) continue;
-      weights.set(normalizeTag(tag.name), (weights.get(normalizeTag(tag.name)) ?? 0) + weight);
+      const key = normalizeTag(tag.name);
+      if (exclude.has(key)) continue;
+      weights.set(key, (weights.get(key) ?? 0) + weight);
     }
   }
   const peak = Math.max(0, ...weights.values());

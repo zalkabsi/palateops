@@ -3,6 +3,9 @@ import { describe, it } from "node:test";
 
 import {
   EVERYONE_THRESHOLD,
+  displayTags,
+  isInformativeTag,
+  ubiquitousTags,
   compareTaste,
   joinCandidates,
   mixMany,
@@ -148,5 +151,45 @@ describe("summary", () => {
   it("is honest when nothing overlaps", () => {
     assert.equal(verdictFor({ overlap: 0, everyoneCount: 0, total: 4 }).tone, "hard");
     assert.equal(verdictFor({ overlap: 0, everyoneCount: 0, total: 0 }).headline, "No shared ground found");
+  });
+});
+
+describe("tag vocabulary hygiene", () => {
+  it("keeps taste and drops logistics", () => {
+    for (const tag of ["jazz", "natural wine", "dance floor", "artisanal", "picturesque"]) {
+      assert.equal(isInformativeTag(tag), true, `${tag} should survive`);
+    }
+    for (const tag of ["dine in", "takeout", "wheelchair accessible seating", "nfc mobile payments", "onsite services"]) {
+      assert.equal(isInformativeTag(tag), false, `${tag} should be dropped`);
+    }
+  });
+
+  it("drops age brackets and audiences", () => {
+    for (const tag of ["25 29", "30 34", "18-24", "55 and older", "locals", "tourists", "young adults"]) {
+      assert.equal(isInformativeTag(tag), false, `${tag} should be dropped`);
+    }
+  });
+
+  it("drops bare containers", () => {
+    for (const tag of ["place", "destination", "venue", "point of interest"]) {
+      assert.equal(isInformativeTag(tag), false);
+    }
+  });
+
+  it("cuts tags that appear on most venues", () => {
+    const venues = [
+      { tags: [{ name: "wine" }, { name: "jazz" }] },
+      { tags: [{ name: "wine" }, { name: "vinyl" }] },
+      { tags: [{ name: "wine" }, { name: "wood-fired" }] },
+      { tags: [{ name: "wine" }, { name: "garden" }] },
+    ];
+    const common = ubiquitousTags(venues, { floor: 0.5 });
+    assert.equal(common.has("wine"), true);
+    assert.equal(common.has("jazz"), false);
+  });
+
+  it("never shows logistics on a venue card", () => {
+    const shown = displayTags([{ name: "takeout" }, { name: "Neapolitan" }, { name: "Iced chocolate" }, { name: "Afternoon" }], 3);
+    assert.deepEqual(shown.map((tag) => tag.name), ["Neapolitan", "Iced chocolate", "Afternoon"]);
   });
 });

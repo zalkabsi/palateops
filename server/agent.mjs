@@ -14,7 +14,7 @@
  * model policy can later choose the relaxations instead of the fixed policy.
  */
 
-import { compareTaste, joinCandidates, summarize, tagProfile } from "./compromise.mjs";
+import { compareTaste, joinCandidates, summarize, tagProfile, ubiquitousTags } from "./compromise.mjs";
 import { cacheKey } from "./cache.mjs";
 import { narrate } from "./narrate.mjs";
 import { requestNarration, requestRelaxation } from "./model.mjs";
@@ -246,6 +246,7 @@ export async function runPlan({ input, data, cache, model = null }) {
   }
 
   // ---- 3. read the group's taste vocabulary -------------------------------
+  const tooCommon = ubiquitousTags(joined.venues);
   const profiles = resolvedPeople.map((person, index) => ({
     label: person.label,
     vocab: tagProfile(
@@ -253,6 +254,7 @@ export async function runPlan({ input, data, cache, model = null }) {
         .map((venue) => ({ ...venue, score: venue.scores[index] }))
         .filter((venue) => venue.score > 0)
         .sort((a, b) => b.score - a.score),
+      { exclude: tooCommon },
     ),
   }));
   const taste = compareTaste(profiles);

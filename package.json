@@ -12,7 +12,8 @@
     "start": "node --env-file-if-exists=.env server/index.mjs",
     "dev": "node --env-file-if-exists=.env --watch server/index.mjs",
     "test": "node --test",
-    "check:qloo": "node --env-file-if-exists=.env scripts/check-qloo.mjs"
+    "check:qloo": "node --env-file-if-exists=.env scripts/check-qloo.mjs",
+    "warm": "node scripts/warm-presets.mjs"
   },
   "dependencies": {
     "@qloo/qloo-harness": "0.1.26"

@@ -97,6 +97,18 @@ manually and typically take a few business days — request one before you need 
 **Event keys only work on `https://hackathon.api.qloo.com`.** Using any other host returns `401` even with a valid
 key. PalateOps defaults to the hackathon host, so a deploy that sets only `QLOO_API_KEY` is correct.
 
+## Warming the demo
+
+A cold plan pays a Qloo subprocess start per call (~15s each on a small instance), so the starter groups are warmed
+once after every deploy. The cache is server-side only and lives 24h.
+
+```bash
+BASE_URL=https://palateops.onrender.com npm run warm
+```
+
+Cold: 35-45s per two-person group. Warm: under a second. Re-run this after any restart, because the cache is in
+memory.
+
 ## Deploy
 
 The Qloo kit states serverless function runtimes are **not** supported: the harness needs a Node 22.19+ container.

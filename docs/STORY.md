@@ -56,6 +56,8 @@ and it is zero if anybody's score is zero. The harmonic mean is dominated by the
 
 The arithmetic mean ranks Ann's bar above the place everybody likes. Inverting that ordering *is* the product.
 
+**The calls are minimal on purpose.** Each place insight costs a cold subprocess, so the starter groups ship with their Qloo entity IDs already resolved — a two-person plan is four calls, not eight. Everything else is cached by signal set, city and filters for a day.
+
 **The agent loop is plan → act → observe → revise.** It resolves signals, ranks per person, tests the group score,
 and when the answer is nothing it decides what to surrender. When a model is configured, the model makes that
 choice; otherwise a fixed ladder does. Either way the decision, its author and its reason are recorded and shown in
@@ -81,12 +83,15 @@ nothing overlaps — but if Qloo already returned fewer places than requested, n
 call cannot change the answer. The agent now checks that before spending a request. Caching by signal set, city and
 filters keeps a repeated demo at zero calls.
 
+**The taste vocabulary was noise.** Live place entities carry about a hundred tags each, and most describe logistics: "dine in", "takeout", "wheelchair accessible seating", "25 29". My first shared-taste panel therefore reported — with total confidence — that this group's cultural common ground was "casual, dine in, urban". A blocklist cannot win that fight, because almost every word appears on almost every venue. The vocabulary is now cut three ways: category rules for demographics and bare containers, prefix matching for operational terms, and a document-frequency cut that discards any tag attached to more than a third of the returned venues, whatever it says. Filtered, the same profile reads "live music venue, party goers, dance floor".
+
 **Resisting the flattering answer.** The first version always produced a recommendation, because it ranked the
 average. A compromise engine has to be willing to say "this group is opposites" — which is a worse demo and a better
 product. That decision shaped the UI: the headline overlap figure can legitimately be zero.
 
 ## Accomplishments that I'm proud of
 
+- It works on real data: 97 restaurants in Brooklyn, every one carrying a Qloo affinity and tags, of which 3 cleared every person's ranking.
 - A recommender whose headline number is allowed to be zero.
 - Both scores on every card, so the concession is visible instead of implied.
 - A taste vocabulary derived from Qloo's own tags without spending an extra request.

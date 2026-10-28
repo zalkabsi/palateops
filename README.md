@@ -7,7 +7,7 @@ rank the *same real restaurants* separately for every one of them. Then it negot
 clears everybody, and when none exists it loosens a constraint, asks again, and says exactly what it gave up.
 
 > **Status:** the agent, the scoring engine, the negotiation loop and the full request→result path are built and
-> tested (70 tests). The live Qloo leg is wired and verified up to the credential. **No event key has been available
+> tested (76 tests). The live Qloo leg is wired and verified up to the credential. **No event key has been available
 > yet**, so every screenshot and demo currently shows labeled sample data. See [What is not proven](#what-is-not-proven).
 
 ---
@@ -67,11 +67,20 @@ Requires **Node.js 22.19+** (a Qloo Harness requirement).
 
 ```bash
 npm install
-npm test          # 70 tests, no network
+npm test          # 76 tests, no network
 npm start         # http://localhost:8080
 ```
 
 Without a credential the server starts in **sample mode** and says so in a permanent banner and in `/api/health`.
+
+To supply one locally, copy the template and fill it in. `npm start` reads `.env` automatically:
+
+```bash
+cp .env.example .env    # then put QLOO_API_KEY in it
+npm start
+```
+
+`.env` is gitignored. Never paste a key into a command that lands in shell history on a shared machine.
 
 With a key:
 
@@ -129,7 +138,7 @@ locally.
 
 | Item | Status |
 | --- | --- |
-| Scoring, negotiation, cache, HTTP API | Tested (70 tests) |
+| Scoring, negotiation, cache, HTTP API | Tested (76 tests) |
 | Harness invocation and response parsing | Verified against harness `0.1.26`; auth failure path verified with a rejected key |
 | A successful live Qloo response | **Not yet run** — needs the event credential |
 | Whether `affinity` is populated for place insights | **Unknown until `npm run check:qloo` runs** |
@@ -162,7 +171,7 @@ server/
   fixtures.mjs    labeled sample data, used only without a credential
   cache.mjs       TTL + LRU
 public/           the app: one page, no framework
-tests/            70 tests
+tests/            76 tests
 scripts/          check-qloo.mjs
 docs/             scoring rules and the submission draft
 ```

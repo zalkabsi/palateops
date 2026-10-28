@@ -9,10 +9,10 @@
     "node": ">=22.19.0"
   },
   "scripts": {
-    "start": "node server/index.mjs",
-    "dev": "node --watch server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
+    "dev": "node --env-file-if-exists=.env --watch server/index.mjs",
     "test": "node --test",
-    "check:qloo": "node scripts/check-qloo.mjs"
+    "check:qloo": "node --env-file-if-exists=.env scripts/check-qloo.mjs"
   },
   "dependencies": {
     "@qloo/qloo-harness": "0.1.26"
